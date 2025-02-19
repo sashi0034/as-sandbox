@@ -41,7 +41,11 @@ static bool tm_to_time_point(const tm &_tm, std::chrono::time_point<std::chrono:
 	
 	// Adjust the time_t since epoch with the difference of the local timezone to the universal timezone
 	// TODO: localtime, gmtime, and mktime are not threadsafe
-	t += (mktime(localtime(&t)) - mktime(gmtime(&t)));
+	// t += (mktime(localtime(&t)) - mktime(gmtime(&t)));
+	tm local_tm, gm_tm;
+	localtime_s(&local_tm, &t);
+	gmtime_s(&gm_tm, &t);
+	t += (mktime(&local_tm) - mktime(&gm_tm));
 
 	tp = system_clock::from_time_t(t);
 	return true;
