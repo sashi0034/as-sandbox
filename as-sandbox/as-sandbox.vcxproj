@@ -105,6 +105,8 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>angelscript/angelscript/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -120,6 +122,8 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>angelscript/angelscript/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -187,6 +191,7 @@
     <ClCompile Include="angelscript\angelscript\source\as_tokenizer.cpp" />
     <ClCompile Include="angelscript\angelscript\source\as_typeinfo.cpp" />
     <ClCompile Include="angelscript\angelscript\source\as_variablescope.cpp" />
+    <ClCompile Include="Callbacks.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="main_1.cpp" />
     <ClCompile Include="main_2.cpp" />
@@ -209,6 +214,7 @@
     <Content Include="as-sandbox-code\hello.as" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="angelscript\add_on\autowrapper\aswrappedcall.h" />
     <ClInclude Include="angelscript\add_on\contextmgr\contextmgr.h" />
     <ClInclude Include="angelscript\add_on\datetime\datetime.h" />
     <ClInclude Include="angelscript\add_on\debugger\debugger.h" />
@@ -263,6 +269,7 @@
     <ClInclude Include="angelscript\angelscript\source\as_tokenizer.h" />
     <ClInclude Include="angelscript\angelscript\source\as_typeinfo.h" />
     <ClInclude Include="angelscript\angelscript\source\as_variablescope.h" />
+    <ClInclude Include="Callbacks.h" />
     <ClInclude Include="main_1.h" />
     <ClInclude Include="main_2.h" />
   </ItemGroup>
