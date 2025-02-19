@@ -196,6 +196,7 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="main_1.cpp" />
     <ClCompile Include="main_2.cpp" />
+    <ClCompile Include="ScriptPredefined.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="angelscript\angelscript\source\as_callfunc_arm64_gcc.S" />
@@ -206,6 +207,7 @@
     <Content Include="angelscript\angelscript\source\as_callfunc_arm_vita.S" />
     <Content Include="angelscript\angelscript\source\as_callfunc_arm_xcode.S" />
     <Content Include="angelscript\angelscript\source\as_callfunc_riscv64_gcc.S" />
+    <Content Include="as-sandbox-code\as.predefined" />
     <Content Include="asbind20\LICENSE" />
     <Content Include="asbind20\README.md" />
     <CustomBuild Include="angelscript\angelscript\source\as_callfunc_x64_msvc_asm.asm">
@@ -283,6 +285,7 @@
     <ClInclude Include="Callbacks.h" />
     <ClInclude Include="main_1.h" />
     <ClInclude Include="main_2.h" />
+    <ClInclude Include="ScriptPredefined.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
