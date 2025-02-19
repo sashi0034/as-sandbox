@@ -205,6 +205,8 @@
     <Content Include="angelscript\angelscript\source\as_callfunc_arm_vita.S" />
     <Content Include="angelscript\angelscript\source\as_callfunc_arm_xcode.S" />
     <Content Include="angelscript\angelscript\source\as_callfunc_riscv64_gcc.S" />
+    <Content Include="asbind20\LICENSE" />
+    <Content Include="asbind20\README.md" />
     <CustomBuild Include="angelscript\angelscript\source\as_callfunc_x64_msvc_asm.asm">
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ml64.exe /c  /nologo /Fo"$(Configuration)\as_callfunc_x64_msvc_asm.obj" /W3 /Zi /Ta "%(RootDir)%(Directory)\%(Filename)%(Extension)"</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Configuration)\as_callfunc_x64_msvc_asm.obj</Outputs>
@@ -269,6 +271,13 @@
     <ClInclude Include="angelscript\angelscript\source\as_tokenizer.h" />
     <ClInclude Include="angelscript\angelscript\source\as_typeinfo.h" />
     <ClInclude Include="angelscript\angelscript\source\as_variablescope.h" />
+    <ClInclude Include="asbind20\asbind.hpp" />
+    <ClInclude Include="asbind20\bind.hpp" />
+    <ClInclude Include="asbind20\detail\include_as.hpp" />
+    <ClInclude Include="asbind20\generic.hpp" />
+    <ClInclude Include="asbind20\invoke.hpp" />
+    <ClInclude Include="asbind20\type_traits.hpp" />
+    <ClInclude Include="asbind20\utility.hpp" />
     <ClInclude Include="Callbacks.h" />
     <ClInclude Include="main_1.h" />
     <ClInclude Include="main_2.h" />
