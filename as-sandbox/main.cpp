@@ -85,10 +85,23 @@ int main(int argc, char** argv)
 
     CScriptBuilder builder{};
 
-    AssertNonNegative{"failed to build module"sv}
-        | builder.StartNewModule(engine, moduleName.c_str())
-        | builder.AddSectionFromFile("as-sandbox-code/hello.as")
-        | builder.BuildModule();
+    if (builder.StartNewModule(engine, moduleName.c_str()) < 0)
+    {
+        std::cerr << "Failed to start a new module" << std::endl;
+        return 1;
+    }
+
+    if (builder.AddSectionFromFile(moduleName.c_str()) < 0)
+    {
+        std::cerr << "Failed to add section from file" << std::endl;
+        return 1;
+    }
+
+    if (builder.BuildModule() < 0)
+    {
+        std::cerr << "Failed to build module" << std::endl;
+        return 1;
+    }
 
     asIScriptModule* module = engine->GetModule(moduleName.c_str());
     if (not module)
@@ -96,6 +109,8 @@ int main(int argc, char** argv)
         std::cerr << "Failed to find module" << std::endl;
         return 1;
     }
+
+    // -----------------------------------------------
 
     asIScriptFunction* func = module->GetFunctionByDecl("void main()");
     if (not func)

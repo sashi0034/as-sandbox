@@ -13,14 +13,14 @@ namespace Sandbox
         else if (msg->type == asMSGTYPE_INFORMATION)
             type = "[info] ";
 
-        const auto message = std::format("{} {}({},{}) {}\n", type, msg->section, msg->row, msg->col, msg->message);
+        const auto message = std::format("{} {}({},{}) {}", type, msg->section, msg->row, msg->col, msg->message);
         if (msg->type == asMSGTYPE_INFORMATION)
         {
-            std::cout << message;
+            std::cout << message << std::endl;
         }
         else
         {
-            std::cerr << message;
+            std::cerr << message << std::endl;
         }
     }
 }
