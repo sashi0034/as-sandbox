@@ -5,8 +5,9 @@
 // application.
 #include <angelscript.h>
 #include <cassert>
-#include <scriptstdstring/scriptstdstring.h>
-#include <scriptbuilder/scriptbuilder.h>
+
+#include "angelscript/add_on/scriptstdstring/scriptstdstring.h"
+#include "angelscript/add_on/scriptbuilder/scriptbuilder.h"
 
 // Print the script string to the standard output stream
 void print(std::string& msg)
@@ -57,7 +58,7 @@ void main()
         return;
     }
 
-    r = builder.AddSectionFromFile("script/hello.as");
+    r = builder.AddSectionFromFile("as-sandbox-code/hello.as");
     if (r < 0)
     {
         // The builder wasn't able to load the file. Maybe the file
