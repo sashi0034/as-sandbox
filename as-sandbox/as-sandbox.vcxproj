@@ -104,7 +104,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>angelscript/angelscript/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.;angelscript/angelscript/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
@@ -121,7 +121,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>angelscript/angelscript/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.;angelscript/angelscript/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
@@ -191,6 +191,7 @@
     <ClCompile Include="angelscript\angelscript\source\as_tokenizer.cpp" />
     <ClCompile Include="angelscript\angelscript\source\as_typeinfo.cpp" />
     <ClCompile Include="angelscript\angelscript\source\as_variablescope.cpp" />
+    <ClCompile Include="AssertObject.cpp" />
     <ClCompile Include="Callbacks.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="main_1.cpp" />
@@ -278,6 +279,7 @@
     <ClInclude Include="asbind20\invoke.hpp" />
     <ClInclude Include="asbind20\type_traits.hpp" />
     <ClInclude Include="asbind20\utility.hpp" />
+    <ClInclude Include="AssertObject.h" />
     <ClInclude Include="Callbacks.h" />
     <ClInclude Include="main_1.h" />
     <ClInclude Include="main_2.h" />
