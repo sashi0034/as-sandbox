@@ -131,6 +131,9 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /I /D /Y "$(OutDir)$(TargetFileName)" "$(ProjectDir)as-sandbox-code/bin"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="angelscript\add_on\contextmgr\contextmgr.cpp" />
@@ -286,6 +289,9 @@
     <ClInclude Include="main_1.h" />
     <ClInclude Include="main_2.h" />
     <ClInclude Include="ScriptPredefined.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="as-sandbox-code\bin\" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -139,7 +139,7 @@ namespace
     }
 }
 
-/// @brief Generate 'as.predefined', which contains all defined symbols in C++
+/// @brief Generate 'as.predefined' file, which contains all defined symbols in C++. It is used by the language server.
 void GenerateScriptPredefined(const asIScriptEngine* engine, const std::string& path)
 {
     assert(path.ends_with("as.predefined"));

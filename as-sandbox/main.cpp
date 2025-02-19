@@ -1,4 +1,5 @@
-﻿#include <iso646.h>
+﻿#include <iostream>
+#include <iso646.h>
 
 #include "AssertObject.h"
 #include "Callbacks.h"
@@ -28,6 +29,11 @@ namespace
         printf("%s", message.c_str());
     }
 
+    void println(const std::string& message)
+    {
+        printf("%s\n", message.c_str());
+    }
+
     void registerEngine(const asbind20::script_engine& engine)
     {
         // script extenstion: https://www.angelcode.com/angelscript/sdk/docs/manual/doc_addon_script.html
@@ -47,19 +53,36 @@ namespace
         // asbind20: https://github.com/HenryAWE/asbind20/
         asbind20::global(engine)
             .message_callback(&MessageCallback)
-            .function("void print(const string& in message)", &script_print);
+            .function("void print(const string& in message)", &script_print)
+            .function("void println(const string& in message)", &println);
     }
 }
 
-void main()
+int main(int argc, char** argv)
 {
+    std::string moduleName{};
+    if (argc > 1) moduleName = argv[1];
+    else std::cin >> moduleName;
+
+    if (not moduleName.ends_with(".as") && not moduleName.ends_with("as.predefined"))
+    {
+        std::cerr << "Invalid file extension" << std::endl;
+        return 1;
+    }
+
+    // -----------------------------------------------
+
     const auto engine = asbind20::make_script_engine();
 
     registerEngine(engine);
 
-    GenerateScriptPredefined(engine, "as-sandbox-code/as.predefined");
+    if (moduleName.ends_with("as.predefined"))
+    {
+        GenerateScriptPredefined(engine, moduleName);
+        std::cout << "Generated 'as.predefined'" << std::endl;
+        return 0;
+    }
 
-    std::string moduleName = "hello";
     CScriptBuilder builder{};
 
     AssertNonNegative{"failed to build module"sv}
@@ -68,16 +91,25 @@ void main()
         | builder.BuildModule();
 
     asIScriptModule* module = engine->GetModule(moduleName.c_str());
+    if (not module)
+    {
+        std::cerr << "Failed to find module" << std::endl;
+        return 1;
+    }
 
     asIScriptFunction* func = module->GetFunctionByDecl("void main()");
-    AssertNotNull{"function not found"sv} | func;
+    if (not func)
+    {
+        std::cerr << "Failed to find 'void main()'" << std::endl;
+        return 1;
+    }
 
-    asbind20::request_context ctx{engine};
+    const asbind20::request_context ctx{engine};
     const auto result = asbind20::script_invoke<void>(ctx, func);
     if (not result.has_value())
     {
-        printf("Failed to execute the script: %d\n", result.error());
-        // print asEXECUTION_EXCEPTION
+        std::cerr << "Failed to execute the script: " << result.error() << std::endl;
+        // TODO: print exception
     }
 
     module->Discard();

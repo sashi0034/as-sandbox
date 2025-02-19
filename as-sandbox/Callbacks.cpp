@@ -1,6 +1,7 @@
 ﻿#include "Callbacks.h"
 
-#include <cstdio>
+#include <format>
+#include <iostream>
 
 namespace Sandbox
 {
@@ -12,6 +13,14 @@ namespace Sandbox
         else if (msg->type == asMSGTYPE_INFORMATION)
             type = "[info] ";
 
-        printf("%s %s(%d,%d) %s\n", type, msg->section, msg->row, msg->col, msg->message);
+        const auto message = std::format("{} {}({},{}) {}\n", type, msg->section, msg->row, msg->col, msg->message);
+        if (msg->type == asMSGTYPE_INFORMATION)
+        {
+            std::cout << message;
+        }
+        else
+        {
+            std::cerr << message;
+        }
     }
 }
