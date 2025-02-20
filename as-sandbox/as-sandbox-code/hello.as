@@ -10,4 +10,5 @@ void main() {
 
     const string s2 = "pi = " + Constants::Pi;
     println(s2);
+    // println(message: s2);
 }
