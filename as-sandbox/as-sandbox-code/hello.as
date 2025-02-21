@@ -8,7 +8,7 @@ void main() {
     const string s1 = "sin(1.0) = " + v;
     println(s1);
 
-    const string s2 = "pi = " + Constants::Pi;
+    const auto s2 = "pi = " + Constants::Pi;
     println(s2);
     // println(message: s2);
 }

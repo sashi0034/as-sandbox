@@ -1,4 +1,3 @@
-
 void add_value(int a, int b) {
     const int v = a + b;
     println("[int] a + b = " + v);
@@ -14,7 +13,7 @@ void add_value(double a, double b) {
     println("[double] a + b = " + v);
 }
 
-void main(){
+void main() {
     add_value(1, 2);
     add_value(1.1f, 2.1f);
     add_value(1.2, 2.2);
