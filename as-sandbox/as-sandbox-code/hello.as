@@ -35,4 +35,6 @@ void main() {
     // println(message: s2);
 
     println("" + fox(10));
+
+    println("[info] finished!"); // [info]
 }
