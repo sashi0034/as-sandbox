@@ -1,3 +1,9 @@
+/**
+ * @file utility.hpp
+ * @author HenryAWE
+ * @brief Utilities for AngelScript and binding generator
+ */
+
 #ifndef ASBIND20_UTILITY_HPP
 #define ASBIND20_UTILITY_HPP
 
@@ -7,12 +13,12 @@
 #include <cstddef>
 #include <string>
 #include <utility>
-#include <mutex> // IWYU pragma: keep for std::lock_guard
+#include <mutex> // IWYU pragma: export `std::lock_guard`
 #include <compare>
 #include <functional>
 #include <type_traits>
 #include <concepts>
-#include "detail/include_as.hpp" // IWYU pragma: keep
+#include "detail/include_as.hpp"
 
 namespace asbind20
 {
@@ -116,6 +122,11 @@ namespace detail
     using safe_tuple_elem_t = typename safe_tuple_elem<Idx, Tuple>::type;
 } // namespace detail
 
+/**
+ * @brief Function traits
+ *
+ * @tparam T Function type
+ */
 template <typename T>
 class function_traits : public detail::func_traits_impl<std::remove_cvref_t<T>>
 {
@@ -141,7 +152,11 @@ public:
     template <std::size_t Idx>
     using arg_type = std::tuple_element_t<Idx, args_tuple>;
 
-    // `void` if `Idx` is invalid
+    /**
+     * @brief `void` if `Idx` is invalid
+     *
+     * @tparam Idx Argument index
+     */
     template <std::size_t Idx>
     using arg_type_optional = detail::safe_tuple_elem_t<Idx, args_tuple>;
 
@@ -160,7 +175,7 @@ namespace detail
 
 template <typename T>
 concept native_function =
-    !std::is_convertible_v<T, asGENFUNC_t> &&
+    !std::is_convertible_v<T, AS_NAMESPACE_QUALIFIER asGENFUNC_t> &&
     detail::is_native_function_helper<std::decay_t<T>>;
 
 template <typename Lambda>
@@ -168,6 +183,11 @@ concept noncapturing_lambda = requires() {
     { +Lambda{} } -> native_function;
 } && std::is_empty_v<Lambda>;
 
+/**
+ * @brief Wrap NTTP function pointer as type
+ *
+ * @tparam Function NTTP function pointer
+ */
 template <native_function auto Function>
 struct fp_wrapper_t
 {
@@ -181,16 +201,18 @@ template <native_function auto Function>
 constexpr inline fp_wrapper_t<Function> fp{};
 
 template <typename Func>
-asSFuncPtr to_asSFuncPtr(Func f)
+auto to_asSFuncPtr(Func f)
+    -> AS_NAMESPACE_QUALIFIER asSFuncPtr
 {
+    // Reference: asFUNCTION and asMETHOD from the AngelScript interface
     if constexpr(std::is_member_function_pointer_v<Func>)
-        return asSMethodPtr<sizeof(f)>::Convert(f);
+        return AS_NAMESPACE_QUALIFIER asSMethodPtr<sizeof(f)>::Convert(f);
     else
-        return asFunctionPtr(f);
+        return AS_NAMESPACE_QUALIFIER asFunctionPtr(f);
 }
 
 template <int TypeId>
-requires(!(TypeId & ~asTYPEID_MASK_SEQNBR))
+requires(!(TypeId & ~(AS_NAMESPACE_QUALIFIER asTYPEID_MASK_SEQNBR)))
 struct primitive_type_of;
 
 #define ASBIND20_UTILITY_DEFINE_PRIMITIVE_TYPE_OF(as_type_id, cpp_type, script_decl) \
@@ -248,7 +270,9 @@ constexpr bool is_objhandle(int type_id) noexcept
  *
  * @param type_id AngelScript type id
  */
-inline auto sizeof_script_type(asIScriptEngine* engine, int type_id)
+inline auto sizeof_script_type(
+    AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id
+)
     -> AS_NAMESPACE_QUALIFIER asUINT
 {
     assert(engine != nullptr);
@@ -285,7 +309,7 @@ inline auto sizeof_script_type(asIScriptEngine* engine, int type_id)
         }
     }
 
-    asITypeInfo* ti = engine->GetTypeInfoById(type_id);
+    AS_NAMESPACE_QUALIFIER asITypeInfo* ti = engine->GetTypeInfoById(type_id);
     if(!ti)
         return 0;
 
@@ -472,7 +496,8 @@ namespace detail
         out += str;
     }
 
-    constexpr void concat_impl(std::string& out, std::string_view sv)
+    template <std::convertible_to<std::string_view> StringView>
+    constexpr void concat_impl(std::string& out, StringView sv)
     {
         out.append(sv);
     }
@@ -480,6 +505,15 @@ namespace detail
     constexpr void concat_impl(std::string& out, const char* cstr)
     {
         out.append(cstr);
+    }
+
+    template <std::size_t N>
+    constexpr void concat_impl(std::string& out, const char (&str)[N])
+    {
+        if(str[N - 1] == '\0') [[likely]]
+            out.append(str, N - 1);
+        else
+            out.append(str, N);
     }
 
     constexpr void concat_impl(std::string& out, char ch)
@@ -492,14 +526,24 @@ namespace detail
         return str.size();
     }
 
-    constexpr std::size_t concat_size(std::string_view sv)
+    template <std::convertible_to<std::string_view> StringView>
+    constexpr std::size_t concat_size(StringView sv)
     {
-        return sv.size();
+        return std::string_view(sv).size();
     }
 
     constexpr std::size_t concat_size(const char* cstr)
     {
         return std::char_traits<char>::length(cstr);
+    }
+
+    template <std::size_t N>
+    constexpr std::size_t concat_size(const char (&str)[N])
+    {
+        if(str[N - 1] == '\0') [[likely]]
+            return N - 1;
+        else
+            return N;
     }
 
     constexpr std::size_t concat_size(char ch)
@@ -511,8 +555,8 @@ namespace detail
     template <typename T>
     concept concat_accepted =
         std::same_as<std::remove_cvref_t<T>, std::string> ||
-        std::same_as<std::remove_cvref_t<T>, std::string_view> ||
-        std::is_convertible_v<std::decay_t<T>, const char*> ||
+        std::convertible_to<std::decay_t<T>, const char*> ||
+        std::convertible_to<T, std::string_view> ||
         std::same_as<std::remove_cvref_t<T>, char>;
 } // namespace detail
 
@@ -559,7 +603,7 @@ constexpr std::string string_concat(Args&&... args)
  *                     If the state value is invalid, the result will be "asEContextState({state})",
  *                     e.g. "asEContextState(-1)".
  */
-inline std::string to_string(asEContextState state)
+inline std::string to_string(AS_NAMESPACE_QUALIFIER asEContextState state)
 {
     switch(state)
     {
@@ -591,6 +635,185 @@ inline std::string to_string(asEContextState state)
         );
     }
 }
+
+/**
+ * @brief Convert return code to string
+ */
+inline std::string to_string(AS_NAMESPACE_QUALIFIER asERetCodes ret)
+{
+    switch(ret)
+    {
+    case AS_NAMESPACE_QUALIFIER asSUCCESS:
+        return "asSUCCESS";
+    case AS_NAMESPACE_QUALIFIER asERROR:
+        return "asERROR";
+    case AS_NAMESPACE_QUALIFIER asCONTEXT_ACTIVE:
+        return "asCONTEXT_ACTIVE";
+    case AS_NAMESPACE_QUALIFIER asCONTEXT_NOT_FINISHED:
+        return "asCONTEXT_NOT_FINISHED";
+    case AS_NAMESPACE_QUALIFIER asCONTEXT_NOT_PREPARED:
+        return "asCONTEXT_NOT_PREPARED";
+    case AS_NAMESPACE_QUALIFIER asINVALID_ARG:
+        return "asINVALID_ARG";
+    case AS_NAMESPACE_QUALIFIER asNO_FUNCTION:
+        return "asNO_FUNCTION";
+    case AS_NAMESPACE_QUALIFIER asNOT_SUPPORTED:
+        return "asNOT_SUPPORTED";
+    case AS_NAMESPACE_QUALIFIER asINVALID_NAME:
+        return "asINVALID_NAME";
+    case AS_NAMESPACE_QUALIFIER asNAME_TAKEN:
+        return "asNAME_TAKEN";
+    case AS_NAMESPACE_QUALIFIER asINVALID_DECLARATION:
+        return "asINVALID_DECLARATION";
+    case AS_NAMESPACE_QUALIFIER asINVALID_OBJECT:
+        return "asINVALID_OBJECT";
+    case AS_NAMESPACE_QUALIFIER asINVALID_TYPE:
+        return "asINVALID_TYPE";
+    case AS_NAMESPACE_QUALIFIER asALREADY_REGISTERED:
+        return "asALREADY_REGISTERED";
+    case AS_NAMESPACE_QUALIFIER asMULTIPLE_FUNCTIONS:
+        return "asMULTIPLE_FUNCTIONS";
+    case AS_NAMESPACE_QUALIFIER asNO_MODULE:
+        return "asNO_MODULE";
+    case AS_NAMESPACE_QUALIFIER asNO_GLOBAL_VAR:
+        return "asNO_GLOBAL_VAR";
+    case AS_NAMESPACE_QUALIFIER asINVALID_CONFIGURATION:
+        return "asINVALID_CONFIGURATION";
+    case AS_NAMESPACE_QUALIFIER asINVALID_INTERFACE:
+        return "asINVALID_INTERFACE";
+    case AS_NAMESPACE_QUALIFIER asCANT_BIND_ALL_FUNCTIONS:
+        return "asCANT_BIND_ALL_FUNCTIONS";
+    case AS_NAMESPACE_QUALIFIER asLOWER_ARRAY_DIMENSION_NOT_REGISTERED:
+        return "asLOWER_ARRAY_DIMENSION_NOT_REGISTERED";
+    case AS_NAMESPACE_QUALIFIER asWRONG_CONFIG_GROUP:
+        return "asWRONG_CONFIG_GROUP";
+    case AS_NAMESPACE_QUALIFIER asCONFIG_GROUP_IS_IN_USE:
+        return "asCONFIG_GROUP_IS_IN_USE";
+    case AS_NAMESPACE_QUALIFIER asILLEGAL_BEHAVIOUR_FOR_TYPE:
+        return "asILLEGAL_BEHAVIOUR_FOR_TYPE";
+    case AS_NAMESPACE_QUALIFIER asWRONG_CALLING_CONV:
+        return "asWRONG_CALLING_CONV";
+    case AS_NAMESPACE_QUALIFIER asBUILD_IN_PROGRESS:
+        return "asBUILD_IN_PROGRESS";
+    case AS_NAMESPACE_QUALIFIER asINIT_GLOBAL_VARS_FAILED:
+        return "asINIT_GLOBAL_VARS_FAILED";
+    case AS_NAMESPACE_QUALIFIER asOUT_OF_MEMORY:
+        return "asOUT_OF_MEMORY";
+    case AS_NAMESPACE_QUALIFIER asMODULE_IS_IN_USE:
+        return "asMODULE_IS_IN_USE";
+
+    [[unlikely]] default:
+        using namespace std::literals;
+        return string_concat(
+            "asERetCodes("sv,
+            std::to_string(static_cast<int>(ret)),
+            ')'
+        );
+    }
+}
+
+namespace meta
+{
+    template <std::size_t Size>
+    class fixed_string
+    {
+    public:
+        using value_type = char;
+        using size_type = std::size_t;
+
+        /**
+         * @brief INTERNAL DATA. DO NOT USE!
+         *
+         * This member is exposed for satisfying the NTTP requirements of C++.
+         *
+         * @note It includes '\0'
+         */
+        char internal_data[Size + 1] = {};
+
+        constexpr fixed_string(const fixed_string&) noexcept = default;
+
+        template <std::convertible_to<char>... Chars>
+        requires(sizeof...(Chars) == Size)
+        explicit constexpr fixed_string(Chars... chs)
+            : internal_data{static_cast<char>(chs)..., '\0'}
+        {}
+
+        constexpr fixed_string(const char (&str)[Size + 1])
+        {
+            for(size_type i = 0; i < Size; ++i)
+            {
+                internal_data[i] = str[i];
+            }
+            internal_data[Size] = '\0';
+        }
+
+        constexpr bool operator==(const fixed_string&) const noexcept = default;
+
+        template <std::size_t N>
+        requires(N != Size)
+        constexpr bool operator==(const fixed_string<N>&) const noexcept
+        {
+            return false;
+        }
+
+        static constexpr size_type size() noexcept
+        {
+            return Size;
+        };
+
+        static constexpr bool empty() noexcept
+        {
+            return Size == 0;
+        }
+
+        constexpr const value_type* data() const noexcept
+        {
+            return internal_data;
+        }
+
+        constexpr const value_type* c_str() const noexcept
+        {
+            return data();
+        }
+
+        constexpr operator const char*() const noexcept
+        {
+            return c_str();
+        }
+
+        constexpr std::string_view view() const noexcept
+        {
+            return std::string_view(data(), size());
+        }
+
+        constexpr operator std::string_view() const noexcept
+        {
+            return view();
+        }
+    };
+
+    template <std::convertible_to<char>... Chars>
+    fixed_string(Chars...) -> fixed_string<sizeof...(Chars)>;
+
+    template <std::size_t N>
+    fixed_string(const char (&str)[N]) -> fixed_string<N - 1>;
+
+    template <std::size_t SizeL, std::size_t SizeR>
+    constexpr auto operator+(const fixed_string<SizeL>& lhs, const fixed_string<SizeR>& rhs) -> fixed_string<SizeL + SizeR>
+    {
+        if constexpr(SizeL == 0)
+            return rhs;
+        else if constexpr(SizeR == 0)
+            return lhs;
+        else
+        {
+            return [&]<std::size_t... I1, std::size_t... I2>(std::index_sequence<I1...>, std::index_sequence<I2...>)
+            {
+                return fixed_string<SizeL + SizeR>(lhs.internal_data[I1]..., rhs.internal_data[I2]...);
+            }(std::make_index_sequence<SizeL>(), std::make_index_sequence<SizeR>());
+        }
+    }
+} // namespace meta
 
 /**
  * @brief Smart pointer for script object
@@ -969,19 +1192,23 @@ public:
     }
 };
 
-// Tools for initialization list
-// Ref: https://www.angelcode.com/angelscript/sdk/docs/manual/doc_reg_basicref.html#doc_reg_basicref_4
-
 /**
- * @brief Wrapper for the initialization list of AngelScript with repeated values
+ * @brief Proxy for the initialization list of AngelScript with repeated values
+ *
+ * Official documentation:
+ * https://www.angelcode.com/angelscript/sdk/docs/manual/doc_reg_basicref.html#doc_reg_basicref_4
+ *
+ * @warning Never use this proxy with a pattern of limited size, e.g., `{int, int}`
  */
 class script_init_list_repeat
 {
 public:
-    using size_type = asUINT;
+    using size_type = AS_NAMESPACE_QUALIFIER asUINT;
 
     script_init_list_repeat() = delete;
     script_init_list_repeat(const script_init_list_repeat&) noexcept = default;
+
+    explicit script_init_list_repeat(std::nullptr_t) = delete;
 
     explicit script_init_list_repeat(void* list_buf) noexcept
     {
@@ -989,6 +1216,17 @@ public:
         m_size = *static_cast<size_type*>(list_buf);
         m_data = static_cast<std::byte*>(list_buf) + sizeof(size_type);
     }
+
+    /**
+     * @brief Create a wrapper for script initialization list from for generic calling convention
+     *
+     * @param idx The parameter index of the list. Usually, this should be 0 for ordinary types and 1 for template classes.
+     */
+    explicit script_init_list_repeat(
+        AS_NAMESPACE_QUALIFIER asIScriptGeneric* gen,
+        size_type idx = 0
+    )
+        : script_init_list_repeat(*(void**)gen->GetAddressOfArg(idx)) {}
 
     script_init_list_repeat& operator=(const script_init_list_repeat&) noexcept = default;
 
@@ -1020,6 +1258,14 @@ private:
     void* m_data;
 };
 
+/**
+ * @brief Get string from an enum value
+ *
+ * @note This function uses compiler extension to get name of enum.
+ *       It cannot handle enum value that has same underlying value with another enum.
+ *
+ * @tparam Value Enum value
+ */
 template <auto Value>
 requires(std::is_enum_v<decltype(Value)>)
 constexpr std::string_view static_enum_name() noexcept
@@ -1067,6 +1313,21 @@ constexpr std::string_view static_enum_name() noexcept
     return name;
 }
 
+namespace meta
+{
+    template <auto Value>
+    auto fixed_enum_name() noexcept
+    {
+        constexpr std::string_view name_view = static_enum_name<Value>();
+        constexpr std::size_t size = name_view.size();
+
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>)
+        {
+            return fixed_string<size>(name_view[Is]...);
+        }(std::make_index_sequence<size>());
+    }
+} // namespace meta
+
 /**
  * @brief Get offset from a member pointer
  *
@@ -1081,35 +1342,35 @@ std::size_t member_offset(T Class::* mp) noexcept
 
 template <typename T>
 requires(std::is_arithmetic_v<T>)
-const char* name_of()
+auto name_of() noexcept
 {
     if constexpr(std::same_as<T, bool>)
-        return "bool";
+        return meta::fixed_string("bool");
     else if constexpr(std::integral<T>)
     {
         if constexpr(std::is_unsigned_v<T>)
         {
             if constexpr(sizeof(T) == 1)
-                return "uint8";
+                return meta::fixed_string("uint8");
             else if constexpr(sizeof(T) == 2)
-                return "uint16";
+                return meta::fixed_string("uint16");
             else if constexpr(sizeof(T) == 4)
-                return "uint";
+                return meta::fixed_string("uint");
             else if constexpr(sizeof(T) == 8)
-                return "uint64";
+                return meta::fixed_string("uint64");
             else
                 static_assert(!sizeof(T), "Invalid integral");
         }
         else if constexpr(std::is_signed_v<T>)
         {
             if constexpr(sizeof(T) == 1)
-                return "int8";
+                return meta::fixed_string("int8");
             else if constexpr(sizeof(T) == 2)
-                return "int16";
+                return meta::fixed_string("int16");
             else if constexpr(sizeof(T) == 4)
-                return "int";
+                return meta::fixed_string("int");
             else if constexpr(sizeof(T) == 8)
-                return "int64";
+                return meta::fixed_string("int64");
             else
                 static_assert(!sizeof(T), "Invalid integral");
         }
@@ -1119,9 +1380,9 @@ const char* name_of()
     else if constexpr(std::floating_point<T>)
     {
         if constexpr(std::same_as<T, float>)
-            return "float";
+            return meta::fixed_string("float");
         else if constexpr(std::same_as<T, double>)
-            return "double";
+            return meta::fixed_string("double");
         else
             static_assert(!sizeof(T), "Invalid floating point");
     }
