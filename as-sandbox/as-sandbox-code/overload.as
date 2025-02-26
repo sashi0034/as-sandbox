@@ -17,4 +17,7 @@ void main() {
     add_value(1, 2);
     add_value(1.1f, 2.1f);
     add_value(1.2, 2.2);
+
+    const bool gt = 3.0 >= 2.0;
+    println(gt ? "True" : "False");
 }
