@@ -279,9 +279,13 @@
     <ClInclude Include="angelscript\angelscript\source\as_variablescope.h" />
     <ClInclude Include="asbind20\asbind.hpp" />
     <ClInclude Include="asbind20\bind.hpp" />
+    <ClInclude Include="asbind20\container\helper.hpp" />
+    <ClInclude Include="asbind20\container\sequence.hpp" />
+    <ClInclude Include="asbind20\container\small_vector.hpp" />
     <ClInclude Include="asbind20\detail\include_as.hpp" />
     <ClInclude Include="asbind20\generic.hpp" />
     <ClInclude Include="asbind20\invoke.hpp" />
+    <ClInclude Include="asbind20\io\stream.hpp" />
     <ClInclude Include="asbind20\type_traits.hpp" />
     <ClInclude Include="asbind20\utility.hpp" />
     <ClInclude Include="AssertObject.h" />

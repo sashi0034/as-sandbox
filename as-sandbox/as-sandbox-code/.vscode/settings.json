@@ -1,3 +1,4 @@
 {
-    "angelScript.builtinArrayType": "array"
+    "angelScript.suppressAnalyzerErrors": true,
+    "angelScript.builtinArrayType": "array",
 }

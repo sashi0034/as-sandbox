@@ -11,6 +11,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <mutex> // IWYU pragma: export `std::lock_guard`
@@ -244,7 +245,8 @@ using primitive_type_of_t = typename primitive_type_of<TypeId>::type;
 /**
  * @brief Check if a type id refers to void
  */
-constexpr bool is_void(int type_id) noexcept
+[[nodiscard]]
+constexpr bool is_void_type(int type_id) noexcept
 {
     return type_id == (AS_NAMESPACE_QUALIFIER asTYPEID_VOID);
 }
@@ -252,17 +254,58 @@ constexpr bool is_void(int type_id) noexcept
 /**
  * @brief Check if a type id refers to a primitive type
  */
+[[nodiscard]]
 constexpr bool is_primitive_type(int type_id) noexcept
 {
     return !(type_id & ~(AS_NAMESPACE_QUALIFIER asTYPEID_MASK_SEQNBR));
 }
 
 /**
+ * @brief Check if a type id refers to an enum type
+ */
+[[nodiscard]]
+constexpr bool is_enum_type(int type_id) noexcept
+{
+    return is_primitive_type(type_id) &&
+           type_id > AS_NAMESPACE_QUALIFIER asTYPEID_DOUBLE;
+}
+
+/**
  * @brief Check if a type id refers to an object handle
  */
+[[nodiscard]]
 constexpr bool is_objhandle(int type_id) noexcept
 {
     return type_id & (AS_NAMESPACE_QUALIFIER asTYPEID_OBJHANDLE);
+}
+
+/**
+ * @brief Check if a type requires GC
+ *
+ * This can be used for template callback.
+ *
+ * @param ti Type info. Null pointer is allowed for indicating primitive type.
+ *           It's safe to call this function by `type_requires_gc(ti->GetSubType())`
+ */
+[[nodiscard]]
+inline bool type_requires_gc(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
+{
+    if(!ti) [[unlikely]]
+        return false;
+
+    auto flags = ti->GetFlags();
+
+    if(flags & AS_NAMESPACE_QUALIFIER asOBJ_REF)
+    {
+        return true;
+    }
+    else if((flags & AS_NAMESPACE_QUALIFIER asOBJ_VALUE) &&
+            (flags & AS_NAMESPACE_QUALIFIER asOBJ_GC))
+    {
+        return true;
+    }
+
+    return false;
 }
 
 /**
@@ -361,22 +404,27 @@ inline std::size_t copy_primitive_value(void* dst, const void* src, int type_id)
     }
 }
 
+namespace meta
+{
+    template <typename... Ts>
+    class overloaded : public Ts...
+    {
+    public:
+        using Ts::operator()...;
+    };
+
+    template <typename... Ts>
+    overloaded(Ts&&...) -> overloaded<Ts...>;
+} // namespace meta
+
 template <typename T>
 concept void_ptr = std::is_pointer_v<std::decay_t<T>> &&
                    std::is_void_v<std::remove_pointer_t<std::decay_t<T>>>;
 
-template <typename... Ts>
-class overloaded : public Ts...
-{
-public:
-    using Ts::operator()...;
-};
-
-template <typename... Ts>
-overloaded(Ts&&...) -> overloaded<Ts...>;
-
 /**
  * @brief Dispatches pointer of primitive values to corresponding type. Similar to the `std::visit`.
+ *
+ * @note This function disallows void type (`asTYPEID_VOID`)
  *
  * @param Visitor Callable object that can accept all kind of pointer to primitive types
  * @param type_id AngelScript TypeId
@@ -387,7 +435,7 @@ requires(sizeof...(VoidPtrs) > 0)
 decltype(auto) visit_primitive_type(Visitor&& vis, int type_id, VoidPtrs... args)
 {
     assert(is_primitive_type(type_id) && "Must be a primitive type");
-    assert(!is_void(type_id) && "Must not be void");
+    assert(!is_void_type(type_id) && "Must not be void");
 
     auto wrapper = [&]<typename T>(std::in_place_type_t<T>) -> decltype(auto)
     {
@@ -451,43 +499,83 @@ decltype(auto) visit_script_type(Visitor&& vis, int type_id, VoidPtrs... args)
     }
 }
 
-class as_exclusive_lock_t
+/**
+ * @brief Convert primitive type ID to corresponding `std::in_place_type<T>`
+ *
+ * @tparam Visitor Callable that accepts the `std::in_place_type<T>`
+ */
+template <typename Visitor>
+decltype(auto) visit_primitive_type_id(Visitor&& vis, int type_id)
 {
-public:
-    static void lock()
+    assert(is_primitive_type(type_id));
+
+#define ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(as_type_id) \
+case as_type_id:                                               \
+    return std::invoke(                                        \
+        std::forward<Visitor>(vis),                            \
+        std::in_place_type<primitive_type_of_t<as_type_id>>    \
+    )
+
+    switch(type_id)
     {
-        AS_NAMESPACE_QUALIFIER asAcquireExclusiveLock();
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_BOOL);
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_INT8);
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_INT16);
+    default: // enums
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_INT32);
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_INT64);
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_UINT8);
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_UINT16);
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_UINT32);
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_UINT64);
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_FLOAT);
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_DOUBLE);
     }
 
-    static void unlock()
+#undef ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE
+}
+
+namespace detail
+{
+    class as_exclusive_lock_t
     {
-        AS_NAMESPACE_QUALIFIER asReleaseExclusiveLock();
-    }
-};
+    public:
+        static void lock()
+        {
+            AS_NAMESPACE_QUALIFIER asAcquireExclusiveLock();
+        }
+
+        static void unlock()
+        {
+            AS_NAMESPACE_QUALIFIER asReleaseExclusiveLock();
+        }
+    };
+
+    class as_shared_lock_t
+    {
+    public:
+        static void lock()
+        {
+            AS_NAMESPACE_QUALIFIER asAcquireSharedLock();
+        }
+
+        static void unlock()
+        {
+            AS_NAMESPACE_QUALIFIER asReleaseSharedLock();
+        }
+    };
+} // namespace detail
 
 /**
  * @brief Wrapper for `asAcquireExclusiveLock()` and `asReleaseExclusiveLock()`
  */
-inline constexpr as_exclusive_lock_t as_exclusive_lock = {};
+inline constexpr detail::as_exclusive_lock_t as_exclusive_lock = {};
 
-class as_shared_lock_t
-{
-public:
-    static void lock()
-    {
-        AS_NAMESPACE_QUALIFIER asAcquireSharedLock();
-    }
-
-    static void unlock()
-    {
-        AS_NAMESPACE_QUALIFIER asReleaseSharedLock();
-    }
-};
 
 /**
  * @brief Wrapper for `asAcquireSharedLock()` and `asReleaseSharedLock()`
  */
-inline constexpr as_shared_lock_t as_shared_lock = {};
+inline constexpr detail::as_shared_lock_t as_shared_lock = {};
 
 namespace detail
 {
@@ -915,6 +1003,7 @@ private:
  *
  * @return A pointer to the currently executing context, or null if no context is executing
  */
+[[nodiscard]]
 inline auto current_context()
     -> AS_NAMESPACE_QUALIFIER asIScriptContext*
 {
@@ -1154,6 +1243,406 @@ inline script_engine make_script_engine(
 }
 
 /**
+ * @brief Helper for `asILockableSharedBool*`
+ *
+ * This class can be helpful for implementing weak reference support.
+ */
+class lockable_shared_bool
+{
+public:
+    using handle_type = AS_NAMESPACE_QUALIFIER asILockableSharedBool*;
+
+    lockable_shared_bool() noexcept = default;
+
+    explicit lockable_shared_bool(handle_type bool_)
+    {
+        reset(bool_);
+    }
+
+    lockable_shared_bool(std::in_place_t, handle_type bool_) noexcept
+    {
+        reset(std::in_place, bool_);
+    }
+
+    lockable_shared_bool(const lockable_shared_bool& other)
+    {
+        reset(other.m_bool);
+    }
+
+    lockable_shared_bool(lockable_shared_bool&& other) noexcept
+        : m_bool(std::exchange(other.m_bool, nullptr)) {}
+
+    ~lockable_shared_bool()
+    {
+        reset(nullptr);
+    }
+
+    bool operator==(const lockable_shared_bool& other) const = default;
+
+    void reset(std::nullptr_t = nullptr) noexcept
+    {
+        if(m_bool)
+        {
+            m_bool->Release();
+            m_bool = nullptr;
+        }
+    }
+
+    void reset(handle_type bool_) noexcept
+    {
+        if(m_bool)
+            m_bool->Release();
+        m_bool = bool_;
+        if(m_bool)
+            m_bool->AddRef();
+    }
+
+    /**
+     * @brief Connect to the weak reference flag of object
+     *
+     * @param obj Object to connect
+     * @param ti Type information
+     *
+     * @note If failed to connect, this helper will be reset to nullptr.
+     */
+    void connect_object(void* obj, AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
+    {
+        if(!ti) [[unlikely]]
+        {
+            reset();
+            return;
+        }
+
+        reset(ti->GetEngine()->GetWeakRefFlagOfScriptObject(obj, ti));
+    }
+
+    /**
+     * @warning If you get the lockable shared bool by `GetWeakRefFlagOfScriptObject()`,
+     *          you should @b not use this function! Because that function won't increase the reference count.
+     *
+     * @sa reset(inplace_addref_t, handle_type)
+     */
+    void reset(std::in_place_t, handle_type bool_) noexcept
+    {
+        if(m_bool)
+            m_bool->Release();
+        m_bool = bool_;
+    }
+
+    lockable_shared_bool& operator=(const lockable_shared_bool& other)
+    {
+        if(this == &other)
+            return *this;
+
+        reset(nullptr);
+        if(other.m_bool)
+        {
+            other.m_bool->AddRef();
+            m_bool = other.m_bool;
+        }
+
+        return *this;
+    }
+
+    lockable_shared_bool& operator=(lockable_shared_bool&& other)
+    {
+        if(this == &other)
+            return *this;
+
+        lockable_shared_bool(std::move(other)).swap(*this);
+        return *this;
+    }
+
+    void lock()
+    {
+        assert(*this);
+        m_bool->Lock();
+    }
+
+    void unlock() noexcept
+    {
+        assert(*this);
+        m_bool->Unlock();
+    }
+
+    bool get_flag() const
+    {
+        assert(*this);
+        return m_bool->Get();
+    }
+
+    void set_flag(bool value = true)
+    {
+        m_bool->Set(value);
+    }
+
+    handle_type get() const noexcept
+    {
+        return m_bool;
+    }
+
+    handle_type operator->() const noexcept
+    {
+        return m_bool;
+    }
+
+    operator handle_type() const noexcept
+    {
+        return get();
+    }
+
+    explicit operator bool() const noexcept
+    {
+        return m_bool != nullptr;
+    }
+
+    void swap(lockable_shared_bool& other) noexcept
+    {
+        std::swap(m_bool, other.m_bool);
+    }
+
+private:
+    handle_type m_bool = nullptr;
+};
+
+/**
+ * @brief Create a lockable shared bool for implementing weak reference
+ *
+ * @note Lock the exclusive lock in multithreading enviornment
+ */
+[[nodiscard]]
+inline lockable_shared_bool make_lockable_shared_bool()
+{
+    return lockable_shared_bool(
+        std::in_place, AS_NAMESPACE_QUALIFIER asCreateLockableSharedBool()
+    );
+}
+
+/**
+ * @brief RAII helper for `asITypeInfo*`.
+ */
+class script_typeinfo
+{
+public:
+    using handle_type = AS_NAMESPACE_QUALIFIER asITypeInfo*;
+
+    script_typeinfo() noexcept = default;
+
+    /**
+     * @brief Assign a type info object. It @b won't increase the reference count!
+     * @sa script_typeinfo(inplace_addref_t, handle_type)
+     *
+     * @warning DON'T use this constructor unless you know what you are doing!
+     *
+     * @note Generally, the AngelScript APIs for getting type info won't increase reference count,
+     *       such as being the hidden first argument of template class constructor/factory.
+     */
+    explicit script_typeinfo(std::in_place_t, handle_type ti) noexcept
+        : m_ti(ti) {}
+
+    /**
+     * @brief Assign a type info object, and increase reference count
+     */
+    script_typeinfo(handle_type ti) noexcept
+        : m_ti(ti)
+    {
+        if(m_ti)
+            m_ti->AddRef();
+    }
+
+    script_typeinfo(const script_typeinfo& other) noexcept
+        : m_ti(other.m_ti)
+    {
+        if(m_ti)
+            m_ti->AddRef();
+    }
+
+    script_typeinfo(script_typeinfo&& other) noexcept
+        : m_ti(std::exchange(other.m_ti, nullptr)) {}
+
+    ~script_typeinfo()
+    {
+        reset();
+    }
+
+    script_typeinfo& operator=(const script_typeinfo& other) noexcept
+    {
+        if(this != &other)
+            reset(other.m_ti);
+        return *this;
+    }
+
+    script_typeinfo& operator=(script_typeinfo&& other) noexcept
+    {
+        if(this != &other)
+            reset(other.release());
+        return *this;
+    }
+
+    [[nodiscard]]
+    handle_type get() const noexcept
+    {
+        return m_ti;
+    }
+
+    handle_type operator->() const noexcept
+    {
+        return get();
+    }
+
+    operator handle_type() const noexcept
+    {
+        return get();
+    }
+
+    handle_type release() noexcept
+    {
+        return std::exchange(m_ti, nullptr);
+    }
+
+    void reset(std::nullptr_t = nullptr) noexcept
+    {
+        if(m_ti)
+        {
+            m_ti->Release();
+            m_ti = nullptr;
+        }
+    }
+
+    void reset(handle_type ti)
+    {
+        if(m_ti)
+            m_ti->Release();
+        m_ti = ti;
+        if(m_ti)
+            m_ti->AddRef();
+    }
+
+    int type_id() const
+    {
+        if(!m_ti) [[unlikely]]
+            return AS_NAMESPACE_QUALIFIER asINVALID_ARG;
+
+        return m_ti->GetTypeId();
+    }
+
+    int subtype_id(AS_NAMESPACE_QUALIFIER asUINT idx) const
+    {
+        if(!m_ti) [[unlikely]]
+            return AS_NAMESPACE_QUALIFIER asINVALID_ARG;
+
+        return m_ti->GetSubTypeId(idx);
+    }
+
+    auto subtype(AS_NAMESPACE_QUALIFIER asUINT idx) const
+        -> AS_NAMESPACE_QUALIFIER asITypeInfo*
+    {
+        if(!m_ti) [[unlikely]]
+            return nullptr;
+
+        return m_ti->GetSubType(idx);
+    }
+
+private:
+    handle_type m_ti = nullptr;
+};
+
+/**
+ * @brief Atomic counter for multithreading
+ *
+ * @note Its initial value will be 1.
+ *
+ * @details This wraps the `asAtomicInc` and `asAtomicDec`.
+ */
+class atomic_counter
+{
+public:
+    using value_type = int;
+
+    /**
+     * @brief Construct a new atomic counter and set the counter value to 1
+     */
+    atomic_counter() noexcept
+        : m_val(1) {}
+
+    atomic_counter(const atomic_counter&) = default;
+
+    atomic_counter(int val) noexcept
+        : m_val(val) {}
+
+    ~atomic_counter() = default;
+
+    atomic_counter& operator=(const atomic_counter&) noexcept = default;
+
+    atomic_counter& operator=(int val) noexcept
+    {
+        m_val = val;
+        return *this;
+    }
+
+    bool operator==(const atomic_counter&) const = default;
+
+    int inc() noexcept
+    {
+        return AS_NAMESPACE_QUALIFIER asAtomicInc(m_val);
+    }
+
+    int dec() noexcept
+    {
+        return AS_NAMESPACE_QUALIFIER asAtomicDec(m_val);
+    }
+
+    operator int() const noexcept
+    {
+        return m_val;
+    }
+
+    // Even prefix increment / decrement will return int value directly,
+    // which is similar to how the `std::atomic<T>` does.
+
+    int operator++() noexcept
+    {
+        return inc();
+    }
+
+    int operator--() noexcept
+    {
+        return dec();
+    }
+
+    /**
+     * @brief Decrease reference count. It will call the destroyer if the count reaches 0.
+     */
+    template <typename Destroyer, typename... Args>
+    decltype(auto) dec_and_try_destroy(Destroyer&& d, Args&&... args)
+    {
+        if(dec() == 0)
+        {
+            return std::invoke(
+                std::forward<Destroyer>(d),
+                std::forward<Args>(args)...
+            );
+        }
+    }
+
+    /**
+     * @brief Decrease reference count. It will delete the pointer if the count reaches 0.
+     */
+    template <typename T>
+    requires(requires(T* ptr) { delete ptr; })
+    void dec_and_try_delete(T* ptr) noexcept
+    {
+        if(dec() == 0)
+        {
+            delete ptr;
+        }
+    }
+
+private:
+    int m_val;
+};
+
+/**
  * @brief Wrap `asAllocMem()` and `asFreeMem()` as a C++ allocator
  */
 template <typename T>
@@ -1235,11 +1724,13 @@ public:
         return m_data == rhs.data();
     }
 
+    [[nodiscard]]
     size_type size() const noexcept
     {
         return m_size;
     }
 
+    [[nodiscard]]
     void* data() const noexcept
     {
         return m_data;
@@ -1248,6 +1739,7 @@ public:
     /**
      * @brief Revert to raw pointer for forwarding list to another function
      */
+    [[nodiscard]]
     void* forward() const noexcept
     {
         return static_cast<std::byte*>(m_data) - sizeof(size_type);
@@ -1315,6 +1807,13 @@ constexpr std::string_view static_enum_name() noexcept
 
 namespace meta
 {
+    /**
+     * @brief Get string representation of an enum value in fixed string
+     *
+     * @note This function has limitations. @sa static_enum_name
+     *
+     * @tparam Value Enum value
+     */
     template <auto Value>
     auto fixed_enum_name() noexcept
     {
@@ -1395,10 +1894,12 @@ concept has_static_name =
     std::is_arithmetic_v<T> &&
     !std::same_as<T, char>;
 
+[[nodiscard]]
 inline auto get_default_factory(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
     -> AS_NAMESPACE_QUALIFIER asIScriptFunction*
 {
-    assert(ti != nullptr);
+    if(!ti) [[unlikely]]
+        return nullptr;
 
     for(AS_NAMESPACE_QUALIFIER asUINT i = 0; i < ti->GetFactoryCount(); ++i)
     {
@@ -1411,10 +1912,12 @@ inline auto get_default_factory(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
     return nullptr;
 }
 
+[[nodiscard]]
 inline auto get_default_constructor(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
     -> AS_NAMESPACE_QUALIFIER asIScriptFunction*
 {
-    assert(ti != nullptr);
+    if(!ti) [[unlikely]]
+        return nullptr;
 
     for(AS_NAMESPACE_QUALIFIER asUINT i = 0; i < ti->GetBehaviourCount(); ++i)
     {
@@ -1431,6 +1934,29 @@ inline auto get_default_constructor(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
     return nullptr;
 }
 
+[[nodiscard]]
+inline auto get_weakref_flag(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
+    -> AS_NAMESPACE_QUALIFIER asIScriptFunction*
+{
+    if(!ti) [[unlikely]]
+        return nullptr;
+
+    for(AS_NAMESPACE_QUALIFIER asUINT i = 0; i < ti->GetBehaviourCount(); ++i)
+    {
+        AS_NAMESPACE_QUALIFIER asEBehaviours beh;
+        AS_NAMESPACE_QUALIFIER asIScriptFunction* func =
+            ti->GetBehaviourByIndex(i, &beh);
+        if(beh == AS_NAMESPACE_QUALIFIER asBEHAVE_GET_WEAKREF_FLAG)
+        {
+            if(func->GetParamCount() == 0)
+                return func;
+        }
+    }
+
+    return nullptr;
+}
+
+[[nodiscard]]
 inline int translate_three_way(std::weak_ordering ord) noexcept
 {
     if(ord < 0)
@@ -1441,6 +1967,7 @@ inline int translate_three_way(std::weak_ordering ord) noexcept
         return 0;
 }
 
+[[nodiscard]]
 inline std::strong_ordering translate_opCmp(int cmp) noexcept
 {
     if(cmp < 0)
@@ -1469,6 +1996,543 @@ inline void set_script_exception(const std::string& info)
 {
     set_script_exception(info.c_str());
 }
+
+namespace container
+{
+    /**
+     * @brief Helper for storing a single script object
+     */
+    class single
+    {
+    public:
+        single() noexcept
+        {
+            m_data.ptr = nullptr;
+        };
+
+        single(const single&) = delete;
+
+        single(single&& other) noexcept
+        {
+            *this = std::move(other);
+        }
+
+        ~single()
+        {
+            assert(m_data.ptr == nullptr && "reference not released");
+        }
+
+        single& operator=(const single&) = delete;
+
+        single& operator=(single&& other) noexcept
+        {
+            if(this == &other) [[unlikely]]
+                return *this;
+
+            std::memcpy(&m_data, &other.m_data, sizeof(m_data));
+            other.m_data.ptr = nullptr;
+
+            return *this;
+        }
+
+        void* data_address(int type_id)
+        {
+            assert(!is_void_type(type_id));
+
+            if(is_primitive_type(type_id))
+                return m_data.primitive;
+            else if(is_objhandle(type_id))
+                return &m_data.handle;
+            else
+                return m_data.ptr;
+        }
+
+        const void* data_address(int type_id) const
+        {
+            assert(!is_void_type(type_id));
+
+            if(is_primitive_type(type_id))
+                return m_data.primitive;
+            else if(is_objhandle(type_id))
+                return &m_data.handle;
+            else
+                return m_data.ptr;
+        }
+
+        /**
+         * @brief Get the referenced object
+         *
+         * @note Only available if stored data is @b NOT primitive value
+         */
+        [[nodiscard]]
+        void* object_ref() const noexcept
+        {
+            return m_data.ptr;
+        }
+
+        void construct(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id)
+        {
+            assert(!is_void_type(type_id));
+
+            if(is_primitive_type(type_id))
+            {
+                std::memset(m_data.primitive, 0, 8);
+            }
+            else if(is_objhandle(type_id))
+            {
+                m_data.handle = nullptr;
+            }
+            else
+            {
+                m_data.ptr = engine->CreateScriptObject(
+                    engine->GetTypeInfoById(type_id)
+                );
+            }
+        }
+
+        void copy_construct(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id, const void* ref)
+        {
+            assert(!is_void_type(type_id));
+
+            if(is_primitive_type(type_id))
+            {
+                copy_primitive_value(m_data.primitive, ref, type_id);
+            }
+            else if(is_objhandle(type_id))
+            {
+                void* handle = *static_cast<void* const*>(ref);
+                m_data.handle = handle;
+                if(handle)
+                {
+                    engine->AddRefScriptObject(
+                        handle,
+                        engine->GetTypeInfoById(type_id)
+                    );
+                }
+            }
+            else
+            {
+                m_data.ptr = engine->CreateScriptObjectCopy(
+                    const_cast<void*>(ref),
+                    engine->GetTypeInfoById(type_id)
+                );
+            }
+        }
+
+        void copy_assign_from(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id, const void* ref)
+        {
+            assert(!is_void_type(type_id));
+
+            if(is_primitive_type(type_id))
+            {
+                copy_primitive_value(m_data.primitive, ref, type_id);
+            }
+            else if(is_objhandle(type_id))
+            {
+                AS_NAMESPACE_QUALIFIER asITypeInfo* ti = engine->GetTypeInfoById(type_id);
+                if(m_data.handle)
+                    engine->ReleaseScriptObject(m_data.handle, ti);
+                void* handle = *static_cast<void* const*>(ref);
+                m_data.handle = handle;
+                if(handle)
+                {
+                    engine->AddRefScriptObject(
+                        handle, ti
+                    );
+                }
+            }
+            else
+            {
+                engine->AssignScriptObject(
+                    m_data.ptr,
+                    const_cast<void*>(ref),
+                    engine->GetTypeInfoById(type_id)
+                );
+            }
+        }
+
+        void copy_assign_to(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id, void* out) const
+        {
+            assert(!is_void_type(type_id));
+            assert(out != nullptr);
+
+            if(is_primitive_type(type_id))
+            {
+                copy_primitive_value(out, m_data.primitive, type_id);
+            }
+            else if(is_objhandle(type_id))
+            {
+                void** out_handle = static_cast<void**>(out);
+
+                AS_NAMESPACE_QUALIFIER asITypeInfo* ti = engine->GetTypeInfoById(type_id);
+                if(*out_handle)
+                    engine->ReleaseScriptObject(*out_handle, ti);
+                *out_handle = m_data.handle;
+                if(m_data.handle)
+                {
+                    engine->AddRefScriptObject(
+                        m_data.handle, ti
+                    );
+                }
+            }
+            else
+            {
+                engine->AssignScriptObject(
+                    out,
+                    m_data.ptr,
+                    engine->GetTypeInfoById(type_id)
+                );
+            }
+        }
+
+        void destroy(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id)
+        {
+            if(is_primitive_type(type_id))
+            {
+                // Suppressing assertion in destructor
+                assert((m_data.ptr = nullptr, true));
+                return;
+            }
+
+            if(!m_data.ptr)
+                return;
+            engine->ReleaseScriptObject(
+                m_data.ptr,
+                engine->GetTypeInfoById(type_id)
+            );
+            m_data.ptr = nullptr;
+        }
+
+        void enum_refs(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
+        {
+            if(!ti) [[unlikely]]
+                return;
+
+            auto flags = ti->GetFlags();
+            if(!(flags & AS_NAMESPACE_QUALIFIER asOBJ_GC)) [[unlikely]]
+                return;
+
+            if(flags & AS_NAMESPACE_QUALIFIER asOBJ_REF)
+            {
+                ti->GetEngine()->GCEnumCallback(object_ref());
+            }
+            else if(flags & AS_NAMESPACE_QUALIFIER asOBJ_VALUE)
+            {
+                ti->GetEngine()->ForwardGCEnumReferences(
+                    object_ref(), ti
+                );
+            }
+        }
+
+    private:
+        union internal_t
+        {
+            std::byte primitive[8]; // primitive value
+            void* handle; // script handle
+            void* ptr; // script object
+        };
+
+        internal_t m_data;
+    };
+} // namespace container
+
+namespace meta
+{
+    namespace detail
+    {
+        template <typename T>
+        concept compressible = !std::is_final_v<T> && std::is_empty_v<T>;
+
+        template <typename T1, typename T2>
+        consteval int select_compressed_pair_impl()
+        {
+            if constexpr(!compressible<T1> && !compressible<T2>)
+            {
+                return 0; // Not compressible. Store them like the `std::pair`.
+            }
+            else if constexpr(compressible<T1> && !compressible<T2>)
+            {
+                return 1; // First type is compressible.
+            }
+            else if constexpr(!compressible<T1> && compressible<T2>)
+            {
+                return 2; // Second type is compressible.
+            }
+            else
+            {
+                // Both are compressible
+                if constexpr(std::same_as<T1, T2>)
+                {
+                    // C++ disallows inheriting from two same types,
+                    // so fallback to as if only the first type is compressible.
+                    return 1;
+                }
+                else
+                    return 3;
+            }
+        }
+
+        template <
+            typename T1,
+            typename T2,
+            int ImplType = select_compressed_pair_impl<T1, T2>()>
+        class compressed_pair_impl;
+
+#define ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_ORDINARY(name) \
+    name##_type& name()& noexcept                             \
+    {                                                         \
+        return m_##name;                                      \
+    }                                                         \
+    const name##_type& name() const& noexcept                 \
+    {                                                         \
+        return m_##name;                                      \
+    }                                                         \
+    name##_type&& name()&& noexcept                           \
+    {                                                         \
+        return std::move(m_##name);                           \
+    }                                                         \
+    const name##_type&& name() const&& noexcept               \
+    {                                                         \
+        return std::move(m_##name);                           \
+    }
+
+#define ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_COMPRESSED(name) \
+    name##_type& name()& noexcept                               \
+    {                                                           \
+        return *this;                                           \
+    }                                                           \
+    const name##_type& name() const& noexcept                   \
+    {                                                           \
+        return *this;                                           \
+    }                                                           \
+    name##_type&& name()&& noexcept                             \
+    {                                                           \
+        return std::move(*this);                                \
+    }                                                           \
+    const name##_type&& name() const&& noexcept                 \
+    {                                                           \
+        return std::move(*this);                                \
+    }
+
+        template <typename T1, typename T2>
+        class compressed_pair_impl<T1, T2, 0>
+        {
+        public:
+            using first_type = T1;
+            using second_type = T2;
+
+            ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_ORDINARY(first);
+            ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_ORDINARY(second);
+
+        protected:
+            compressed_pair_impl() noexcept(std::is_nothrow_default_constructible_v<T1> && std::is_nothrow_default_constructible_v<T2>) = default;
+            compressed_pair_impl(const compressed_pair_impl&) noexcept(std::is_nothrow_copy_constructible_v<T1> && std::is_nothrow_copy_constructible_v<T2>) = default;
+
+            template <typename Tuple1, typename Tuple2, std::size_t... Indices1, std::size_t... Indices2>
+            compressed_pair_impl(
+                Tuple1&& tuple1,
+                Tuple2&& tuple2,
+                std::index_sequence<Indices1...>,
+                std::index_sequence<Indices2...>
+            )
+                : m_first(std::get<Indices1>(tuple1)...), m_second(std::get<Indices2>(tuple2)...)
+            {}
+
+        private:
+            T1 m_first;
+            T2 m_second;
+        };
+
+        template <typename T1, typename T2>
+        class compressed_pair_impl<T1, T2, 1> : public T1
+        {
+        public:
+            using first_type = T1;
+            using second_type = T2;
+
+            ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_COMPRESSED(first);
+            ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_ORDINARY(second);
+
+        protected:
+            compressed_pair_impl() noexcept(std::is_nothrow_default_constructible_v<T1> && std::is_nothrow_default_constructible_v<T2>) = default;
+            compressed_pair_impl(const compressed_pair_impl&) noexcept(std::is_nothrow_copy_constructible_v<T1> && std::is_nothrow_copy_constructible_v<T2>) = default;
+
+            template <typename Tuple1, typename Tuple2, std::size_t... Indices1, std::size_t... Indices2>
+            compressed_pair_impl(
+                Tuple1&& tuple1,
+                Tuple2&& tuple2,
+                std::index_sequence<Indices1...>,
+                std::index_sequence<Indices2...>
+            )
+                : T1(std::get<Indices1>(tuple1)...), m_second(std::get<Indices2>(tuple2)...)
+            {}
+
+        private:
+            T2 m_second;
+        };
+
+        template <typename T1, typename T2>
+        class compressed_pair_impl<T1, T2, 2> : public T2
+        {
+        public:
+            using first_type = T1;
+            using second_type = T2;
+
+            ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_ORDINARY(first);
+            ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_COMPRESSED(second);
+
+        protected:
+            compressed_pair_impl() noexcept(std::is_nothrow_default_constructible_v<T1> && std::is_nothrow_default_constructible_v<T2>) = default;
+            compressed_pair_impl(const compressed_pair_impl&) noexcept(std::is_nothrow_copy_constructible_v<T1> && std::is_nothrow_copy_constructible_v<T2>) = default;
+
+            template <typename Tuple1, typename Tuple2, std::size_t... Indices1, std::size_t... Indices2>
+            compressed_pair_impl(
+                Tuple1&& tuple1,
+                Tuple2&& tuple2,
+                std::index_sequence<Indices1...>,
+                std::index_sequence<Indices2...>
+            )
+                : T2(std::get<Indices1>(tuple1)...), m_first(std::get<Indices2>(tuple2)...)
+            {}
+
+        private:
+            T1 m_first;
+        };
+
+        template <typename T1, typename T2>
+        class compressed_pair_impl<T1, T2, 3> : public T1, public T2
+        {
+        public:
+            using first_type = T1;
+            using second_type = T2;
+
+            ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_COMPRESSED(first);
+            ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_COMPRESSED(second);
+
+        protected:
+            compressed_pair_impl() noexcept(std::is_nothrow_default_constructible_v<T1> && std::is_nothrow_default_constructible_v<T2>) = default;
+            compressed_pair_impl(const compressed_pair_impl&) noexcept(std::is_nothrow_copy_constructible_v<T1> && std::is_nothrow_copy_constructible_v<T2>) = default;
+
+            template <typename Tuple1, typename Tuple2, std::size_t... Indices1, std::size_t... Indices2>
+            compressed_pair_impl(
+                Tuple1&& tuple1,
+                Tuple2&& tuple2,
+                std::index_sequence<Indices1...>,
+                std::index_sequence<Indices2...>
+            )
+                : T1(std::get<Indices1>(tuple1)...), T2(std::get<Indices2>(tuple2)...)
+            {}
+        };
+
+#undef ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_COMPRESSED
+#undef ASBIND20_DETAIL_COMPRESSED_PAIR_MEMBER_ORDINARY
+    } // namespace detail
+
+    /**
+     * @brief Compressed pair for saving storage space
+     *
+     * This class will use the empty base optimization (EBO) to reduce the size of compressed pair.
+     *
+     * @tparam T1 First member type
+     * @tparam T2 Second member type
+     */
+    template <typename T1, typename T2>
+    class compressed_pair : public detail::compressed_pair_impl<T1, T2>
+    {
+        using my_base = detail::compressed_pair_impl<T1, T2>;
+
+    public:
+        using first_type = T1;
+        using second_type = T2;
+
+        template <std::size_t Idx>
+        requires(Idx < 2)
+        using element_type = std::conditional_t<Idx == 0, T1, T2>;
+
+        compressed_pair() = default;
+
+        compressed_pair(const compressed_pair&) = default;
+
+        compressed_pair(compressed_pair&&) noexcept(std::is_nothrow_move_constructible_v<T1> && std::is_nothrow_move_constructible_v<T2>) = default;
+
+        template <typename Tuple1, typename Tuple2>
+        compressed_pair(std::piecewise_construct_t, Tuple1&& tuple1, Tuple2&& tuple2)
+            : my_base(
+                  std::forward<Tuple1>(tuple1),
+                  std::forward<Tuple2>(tuple2),
+                  std::make_index_sequence<std::tuple_size_v<Tuple1>>(),
+                  std::make_index_sequence<std::tuple_size_v<Tuple2>>()
+              )
+        {}
+
+        compressed_pair(const T1& t1, const T2& t2)
+            : compressed_pair(std::piecewise_construct, std::make_tuple(t1), std::make_tuple(t2)) {}
+
+        compressed_pair(T1&& t1, T2&& t2) noexcept(std::is_nothrow_move_constructible_v<T1> && std::is_nothrow_move_constructible_v<T2>)
+            : compressed_pair(std::piecewise_construct, std::make_tuple(std::move(t1)), std::make_tuple(std::move(t2))) {}
+
+        template <std::size_t Idx>
+        friend element_type<Idx>& get(compressed_pair& cp) noexcept
+        {
+            if constexpr(Idx == 0)
+                return cp.first();
+            else
+                return cp.second();
+        }
+
+        template <std::size_t Idx>
+        friend const element_type<Idx>& get(const compressed_pair& cp) noexcept
+        {
+            if constexpr(Idx == 0)
+                return cp.first();
+            else
+                return cp.second();
+        }
+
+        template <std::size_t Idx>
+        friend element_type<Idx>&& get(compressed_pair&& cp) noexcept
+        {
+            if constexpr(Idx == 0)
+                return std::move(cp).first();
+            else
+                return std::move(cp).second();
+        }
+
+        template <std::size_t Idx>
+        friend const element_type<Idx>&& get(const compressed_pair&& cp) noexcept
+        {
+            if constexpr(Idx == 0)
+                return std::move(cp).first();
+            else
+                return std::move(cp).second();
+        }
+
+        void swap(compressed_pair& other) noexcept(std::is_nothrow_swappable_v<T1> && std::is_nothrow_swappable_v<T2>)
+        {
+            using std::swap;
+
+            swap(this->first(), other.first());
+            swap(this->second(), other.second());
+        }
+    };
+} // namespace meta
 } // namespace asbind20
+
+template <typename T1, typename T2>
+struct std::tuple_element<0, asbind20::meta::compressed_pair<T1, T2>>
+{
+    using type = T1;
+};
+
+template <typename T1, typename T2>
+struct std::tuple_element<1, asbind20::meta::compressed_pair<T1, T2>>
+{
+    using type = T2;
+};
+
+template <typename T1, typename T2>
+struct std::tuple_size<asbind20::meta::compressed_pair<T1, T2>> :
+    integral_constant<size_t, 2>
+{};
 
 #endif
