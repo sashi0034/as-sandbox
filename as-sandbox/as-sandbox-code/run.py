@@ -23,10 +23,17 @@ def run_command():
 
 
 class FileChangeHandler(FileSystemEventHandler):
+    prev = None
+
     def on_modified(self, event):
         # If the modified file is the target file, execute the command
         if os.path.abspath(event.src_path) == filepath:
             now = time.strftime("%H:%M:%S")
+            if self.prev is not None and now == self.prev:
+                return
+
+            self.prev = now
+
             print(f"Change detected {now} in {filepath}.")
             run_command()
 
