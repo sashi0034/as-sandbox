@@ -19,7 +19,7 @@ class B {
     B opMul_r(A a) { return B(); }
     B opMul(A a) { return B(); }
 
-    int opAdd_r(int a) { return 0; }
+    int opAdd_r(int a) { return 1; }
 
     int opAdd(AddHandler@ a) { println("B::opAdd: " + a(13, 11)); return 1; }
 }

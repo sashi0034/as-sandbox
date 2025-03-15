@@ -1,4 +1,5 @@
 {
     "angelScript.suppressAnalyzerErrors": true,
     "angelScript.builtinArrayType": "array",
+    "angelScript.experimental.inlineHints": true
 }

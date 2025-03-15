@@ -34,5 +34,9 @@ void main() {
     int i0 = c; // int(c);
     auto i = 1.1f + c;
     auto ka = k_A;
+
+    string str = "";
+    str += "1";
+
     println("Compiled successfully: " + i);
 }
