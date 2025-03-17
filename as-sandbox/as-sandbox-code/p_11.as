@@ -8,11 +8,18 @@ class Vec3 {
     }
 
     funcdef int add_f(int, int);
+
+    void opUShrAssign(int rhs) {
+        x >>>= rhs;
+        y >>>= rhs;
+        z >>>= rhs;
+    }
 }
 
 void main() {
     Vec3 v1;
-    v1.x = 1;
+    v1.x = 1 << 8; // 256
+    v1 >>>= 3; // 256 >> 3 = 32
 
     Vec3 v2;
     v2.y = 2;
