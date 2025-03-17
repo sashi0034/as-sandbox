@@ -1,5 +1,7 @@
 funcdef int ValueGetter(int, int);
 
+funcdef int ValueGetter2(int, int);
+
 int add(int a, int b) {
 // int add(int a, int b) {
     return a + b;
@@ -35,7 +37,8 @@ funcdef int CustomGetter(C_0);
 void main() {
     {
         ValueGetter@ vg = add;
-        int a = vg(1, 2);
+        ValueGetter2@ vg2 = vg;
+        int a = vg2(1, 2);
         println("value: " + a);
     }
 
