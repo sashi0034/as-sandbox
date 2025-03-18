@@ -34,6 +34,16 @@ namespace
         printf("%s\n", message.c_str());
     }
 
+    struct flag_t
+    {
+        bool flag;
+
+        operator bool() const
+        {
+            return flag;
+        }
+    };
+
     void registerEngine(const asbind20::script_engine& engine)
     {
         // script extenstion: https://www.angelcode.com/angelscript/sdk/docs/manual/doc_addon_script.html
@@ -55,6 +65,13 @@ namespace
             .message_callback(&MessageCallback)
             .function("void print(const string& in message)", &script_print)
             .function("void println(const string& in message)", &println);
+
+        asbind20::value_class<flag_t>(engine, "flag_t", asOBJ_VALUE)
+            .behaviours_by_traits()
+            .constructor<bool>("bool flag")
+            .opEquals()
+            .opImplConv<bool>()
+            .property("bool flag", &flag_t::flag);
     }
 }
 

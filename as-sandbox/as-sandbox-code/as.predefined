@@ -202,6 +202,16 @@ class filesystem{
 	datetime getCreateDateTime(const string&in) const;
 	datetime getModifyDateTime(const string&in) const;
 }
+class flag_t{
+	~flag_t();
+	flag_t();
+	flag_t(const flag_t&in);
+	flag_t(bool flag);
+	flag_t& opAssign(const flag_t&in);
+	bool opEquals(const flag_t&in) const;
+	bool opImplConv() const;
+	bool flag;
+}
 string formatInt(int64 val, const string&in options = "", uint width = 0);
 string formatUInt(uint64 val, const string&in options = "", uint width = 0);
 string formatFloat(double val, const string&in options = "", uint width = 0, uint precision = 0);
