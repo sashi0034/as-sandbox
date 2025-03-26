@@ -1,4 +1,5 @@
 ﻿#include <iostream>
+#include <filesystem>
 #include <iso646.h>
 
 #include "AssertObject.h"
@@ -73,6 +74,31 @@ namespace
             .opImplConv<bool>()
             .property("bool flag", &flag_t::flag);
     }
+
+    int includeCallback(const char* include, const char* from, CScriptBuilder* builder, void* userParam)
+    {
+        namespace fs = std::filesystem;
+        const fs::path fromDir{from};
+        const fs::path includePath{include};
+
+        fs::path primaryPath = fromDir.parent_path() / includePath;
+        if (fs::exists(primaryPath))
+        {
+            builder->AddSectionFromFile(primaryPath.string().c_str());
+            return 0;
+        }
+
+        const fs::path fallbackDir = fs::current_path() / "include_fallback";
+        const fs::path fallbackPath = fallbackDir / includePath;
+
+        if (fs::exists(fallbackPath))
+        {
+            builder->AddSectionFromFile(fallbackPath.string().c_str());
+            return 0;
+        }
+
+        return -1;
+    }
 }
 
 int main(int argc, char** argv)
@@ -101,6 +127,7 @@ int main(int argc, char** argv)
     }
 
     CScriptBuilder builder{};
+    builder.SetIncludeCallback(includeCallback, nullptr);
 
     if (builder.StartNewModule(engine, moduleName.c_str()) < 0)
     {
