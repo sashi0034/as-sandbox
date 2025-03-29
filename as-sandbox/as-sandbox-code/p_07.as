@@ -1,5 +1,6 @@
 class A {
-    void apple();
+    void apple(){
+    }
 }
 
 namespace A {
