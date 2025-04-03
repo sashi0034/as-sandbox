@@ -150,6 +150,7 @@
     <ClCompile Include="angelscript\add_on\scripthelper\scripthelper.cpp" />
     <ClCompile Include="angelscript\add_on\scriptmath\scriptmath.cpp" />
     <ClCompile Include="angelscript\add_on\scriptmath\scriptmathcomplex.cpp" />
+    <ClCompile Include="angelscript\add_on\scriptsocket\scriptsocket.cpp" />
     <ClCompile Include="angelscript\add_on\scriptstdstring\scriptstdstring.cpp" />
     <ClCompile Include="angelscript\add_on\scriptstdstring\scriptstdstring_utils.cpp" />
     <ClCompile Include="angelscript\add_on\serializer\serializer.cpp" />
@@ -160,6 +161,7 @@
     <ClCompile Include="angelscript\angelscript\source\as_callfunc.cpp" />
     <ClCompile Include="angelscript\angelscript\source\as_callfunc_arm.cpp" />
     <ClCompile Include="angelscript\angelscript\source\as_callfunc_arm64.cpp" />
+    <ClCompile Include="angelscript\angelscript\source\as_callfunc_e2k.cpp" />
     <ClCompile Include="angelscript\angelscript\source\as_callfunc_mips.cpp" />
     <ClCompile Include="angelscript\angelscript\source\as_callfunc_ppc.cpp" />
     <ClCompile Include="angelscript\angelscript\source\as_callfunc_ppc_64.cpp" />
@@ -209,6 +211,7 @@
     <Content Include="angelscript\angelscript\source\as_callfunc_arm_msvc.asm" />
     <Content Include="angelscript\angelscript\source\as_callfunc_arm_vita.S" />
     <Content Include="angelscript\angelscript\source\as_callfunc_arm_xcode.S" />
+    <Content Include="angelscript\angelscript\source\as_callfunc_e2k.S" />
     <Content Include="angelscript\angelscript\source\as_callfunc_riscv64_gcc.S" />
     <Content Include="as-sandbox-code\as.predefined" />
     <Content Include="asbind20\LICENSE" />
@@ -237,9 +240,11 @@
     <ClInclude Include="angelscript\add_on\scripthelper\scripthelper.h" />
     <ClInclude Include="angelscript\add_on\scriptmath\scriptmath.h" />
     <ClInclude Include="angelscript\add_on\scriptmath\scriptmathcomplex.h" />
+    <ClInclude Include="angelscript\add_on\scriptsocket\scriptsocket.h" />
     <ClInclude Include="angelscript\add_on\scriptstdstring\scriptstdstring.h" />
     <ClInclude Include="angelscript\add_on\serializer\serializer.h" />
     <ClInclude Include="angelscript\add_on\weakref\weakref.h" />
+    <ClInclude Include="angelscript\angelscript\include\angelscript.h" />
     <ClInclude Include="angelscript\angelscript\source\as_array.h" />
     <ClInclude Include="angelscript\angelscript\source\as_atomic.h" />
     <ClInclude Include="angelscript\angelscript\source\as_builder.h" />
