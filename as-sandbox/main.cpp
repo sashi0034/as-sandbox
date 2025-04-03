@@ -71,6 +71,7 @@ namespace
             .behaviours_by_traits()
             .constructor<bool>("bool flag")
             .opEquals()
+            .opConv<bool>()
             .opImplConv<bool>()
             .property("bool flag", &flag_t::flag);
     }
