@@ -4,40 +4,42 @@
 #pragma once
 
 #include <asbind20/asbind.hpp>
+#include <optional>
 
 namespace asbind20::ext
 {
-namespace detail
-{
-    template <bool UseGeneric>
-    void register_script_optional_impl(asIScriptEngine* engine);
-}
-
-void register_script_optional(asIScriptEngine* engine, bool generic = has_max_portability());
+void register_script_optional(
+    AS_NAMESPACE_QUALIFIER asIScriptEngine* engine,
+    bool use_generic = has_max_portability()
+);
 
 class script_optional
 {
-    template <bool UseGeneric>
-    friend void detail::register_script_optional_impl(asIScriptEngine* engine);
+    friend void register_script_optional(AS_NAMESPACE_QUALIFIER asIScriptEngine*, bool);
 
 public:
-    script_optional(asITypeInfo* ti);
+    script_optional() = delete;
 
-    script_optional(asITypeInfo* ti, const void* value);
+    script_optional(const script_optional& other);
 
-private:
+    script_optional(AS_NAMESPACE_QUALIFIER asITypeInfo* ti);
+
+    script_optional(AS_NAMESPACE_QUALIFIER asITypeInfo* ti, std::nullopt_t);
+
+    script_optional(AS_NAMESPACE_QUALIFIER asITypeInfo* ti, const script_optional& other);
+
+    script_optional(AS_NAMESPACE_QUALIFIER asITypeInfo* ti, const void* value);
+
     ~script_optional();
 
-public:
     script_optional& operator=(const script_optional& other);
 
     bool operator==(const script_optional& rhs) const;
 
+    void emplace();
     void assign(const void* val);
 
-    void* operator new(std::size_t bytes);
-    void operator delete(void* mem);
-
+    [[nodiscard]]
     bool has_value() const noexcept
     {
         return m_has_value;
@@ -56,35 +58,51 @@ public:
         return has_value();
     }
 
-    asITypeInfo* get_type_info() const
+    [[nodiscard]]
+    auto get_type_info() const
+        -> AS_NAMESPACE_QUALIFIER asITypeInfo*
     {
-        return m_ti;
+        return m_ti.get();
+    }
+
+    void enum_refs(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine);
+    void release_refs(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine);
+
+    [[nodiscard]]
+    int element_type_id() const
+    {
+        return m_ti->GetSubTypeId();
     }
 
 private:
-    asITypeInfo* m_ti = nullptr;
+    script_typeinfo m_ti;
 
-    union data_t
-    {
-    private:
-        void* ptr;
-        std::byte storage[8];
-
-        static bool use_storage(asITypeInfo* ti);
-
-    public:
-        bool copy_construct(asITypeInfo* ti, const void* val);
-        void destruct(asITypeInfo* ti);
-
-        void* get(asITypeInfo* ti);
-        const void* get(asITypeInfo* ti) const;
-    };
-
-    alignas(alignof(double)) data_t m_data;
+    container::single m_data;
     bool m_has_value = false;
-
-    void release();
 };
+
+inline script_optional make_script_optional(
+    AS_NAMESPACE_QUALIFIER asIScriptEngine* engine,
+    std::string_view elem_decl
+)
+{
+    auto* ti = engine->GetTypeInfoByDecl(
+        string_concat("optional<", elem_decl, '>').c_str()
+    );
+    return script_optional(ti);
+}
+
+inline script_optional make_script_optional(
+    AS_NAMESPACE_QUALIFIER asIScriptEngine* engine,
+    std::string_view elem_decl,
+    const void* ref
+)
+{
+    auto* ti = engine->GetTypeInfoByDecl(
+        string_concat("optional<", elem_decl, '>').c_str()
+    );
+    return script_optional(ti, ref);
+}
 } // namespace asbind20::ext
 
 #endif

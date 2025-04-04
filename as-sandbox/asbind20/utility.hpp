@@ -23,6 +23,14 @@
 
 namespace asbind20
 {
+struct this_type_t
+{};
+
+/**
+ * @brief Tag indicating current type. Its exact meaning depends on context.
+ */
+inline constexpr this_type_t this_type{};
+
 namespace detail
 {
     // std::is_constructible implicitly requires T to be destructible,
@@ -184,6 +192,47 @@ concept noncapturing_lambda = requires() {
     { +Lambda{} } -> native_function;
 } && std::is_empty_v<Lambda>;
 
+namespace detail
+{
+    template <typename... Args>
+    struct overload_cast_impl
+    {
+        template <typename Return>
+        constexpr auto operator()(Return (*pfn)(Args...)) const noexcept
+            -> decltype(pfn)
+        {
+            return pfn;
+        }
+
+        template <typename Return, typename Class>
+        constexpr auto operator()(Return (Class::*mp)(Args...), std::false_type = {}) const noexcept
+            -> decltype(mp)
+        {
+            return mp;
+        }
+
+        template <typename Return, typename Class>
+        constexpr auto operator()(Return (Class::*mp)(Args...) const, std::true_type) const noexcept
+            -> decltype(mp)
+        {
+            return mp;
+        }
+    };
+} // namespace detail
+
+/**
+ * @brief Tag for indicating const member
+ */
+constexpr inline std::true_type const_;
+
+/**
+ * @brief Helper for choosing overloaded function
+ *
+ * @tparam Args Parameters of the desired function
+ */
+template <typename... Args>
+constexpr inline detail::overload_cast_impl<Args...> overload_cast{};
+
 /**
  * @brief Wrap NTTP function pointer as type
  *
@@ -284,8 +333,8 @@ constexpr bool is_objhandle(int type_id) noexcept
  *
  * This can be used for template callback.
  *
- * @param ti Type info. Null pointer is allowed for indicating primitive type.
- *           It's safe to call this function by `type_requires_gc(ti->GetSubType())`
+ * @param ti Type information. Null pointer is allowed for indicating primitive type,
+ *           so it's safe to call this function by `type_requires_gc(ti->GetSubType())`.
  */
 [[nodiscard]]
 inline bool type_requires_gc(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
@@ -297,7 +346,10 @@ inline bool type_requires_gc(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
 
     if(flags & AS_NAMESPACE_QUALIFIER asOBJ_REF)
     {
-        return true;
+        if(flags & AS_NAMESPACE_QUALIFIER asOBJ_NOCOUNT)
+            return false;
+        else
+            return true;
     }
     else if((flags & AS_NAMESPACE_QUALIFIER asOBJ_VALUE) &&
             (flags & AS_NAMESPACE_QUALIFIER asOBJ_GC))
@@ -311,6 +363,7 @@ inline bool type_requires_gc(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
 /**
  * @brief Get the size of a script type
  *
+ * @param engine Script engine
  * @param type_id AngelScript type id
  */
 inline auto sizeof_script_type(
@@ -365,7 +418,7 @@ inline auto sizeof_script_type(
  * @param dst Destination pointer
  * @param src Source pointer
  * @param type_id AngelScript type id
- * @return std::size_t Bytes copied
+ * @return Bytes copied
  *
  * @warning Please make sure the destination has enough space for the value
  */
@@ -424,9 +477,9 @@ concept void_ptr = std::is_pointer_v<std::decay_t<T>> &&
 /**
  * @brief Dispatches pointer of primitive values to corresponding type. Similar to the `std::visit`.
  *
- * @note This function disallows void type (`asTYPEID_VOID`)
+ * @warning This function disallows void type (`asTYPEID_VOID`)
  *
- * @param Visitor Callable object that can accept all kind of pointer to primitive types
+ * @param vis Callable object that can accept all kinds of pointers to primitive types
  * @param type_id AngelScript TypeId
  * @param args Pointers to primitive values
  */
@@ -471,9 +524,10 @@ case as_type_id:                                               \
 /**
  * @brief Dispatches pointer of values to corresponding type. Similar to the `std::visit`.
  *
+ * @warning This function disallows void type (`asTYPEID_VOID`)
  * @note The object handle will be converted to `void**`, while script class and registered type will retain as `void*`
  *
- * @param Visitor Callable object that can accept all kind of pointer
+ * @param vis Callable object that can accept all kind of pointer
  * @param type_id AngelScript TypeId
  * @param args Pointers to values
  */
@@ -518,6 +572,7 @@ case as_type_id:                                               \
 
     switch(type_id)
     {
+        ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_VOID);
         ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_BOOL);
         ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_INT8);
         ASBIND20_UTILITY_VISIT_SCRIPT_TYPE_ID_CASE(asTYPEID_INT16);
@@ -687,9 +742,9 @@ constexpr std::string string_concat(Args&&... args)
  * @brief Convert context state enum to string
  *
  * @param state Context state
- * @return std::string String representation of the state.
- *                     If the state value is invalid, the result will be "asEContextState({state})",
- *                     e.g. "asEContextState(-1)".
+ * @return String representation of the state.
+ *         If the state value is invalid, the result will be `"asEContextState({state})"`,
+ *         e.g. `"asEContextState(-1)"`.
  */
 inline std::string to_string(AS_NAMESPACE_QUALIFIER asEContextState state)
 {
@@ -726,6 +781,11 @@ inline std::string to_string(AS_NAMESPACE_QUALIFIER asEContextState state)
 
 /**
  * @brief Convert return code to string
+ *
+ * @param ret Return code
+ * @return String representation of the return code.
+ *         If the value is invalid, the result will be `"asERetCodes({ret})"`,
+ *         e.g. `"asERetCodes(1)"`.
  */
 inline std::string to_string(AS_NAMESPACE_QUALIFIER asERetCodes ret)
 {
@@ -810,11 +870,11 @@ namespace meta
         using size_type = std::size_t;
 
         /**
-         * @brief INTERNAL DATA. DO NOT USE!
+         * @brief **INTERNAL DATA. DO NOT USE!**
          *
          * This member is exposed for satisfying the NTTP requirements of C++.
          *
-         * @note It includes '\0'
+         * @note It includes `\0` at the end.
          */
         char internal_data[Size + 1] = {};
 
@@ -927,7 +987,7 @@ public:
 
     ~script_object()
     {
-        reset(nullptr);
+        reset();
     }
 
     handle_type get() const noexcept
@@ -952,6 +1012,7 @@ public:
      *
      * @return Previously stored object
      */
+    [[nodiscard]]
     handle_type release() noexcept
     {
         return std::exchange(m_obj, nullptr);
@@ -959,43 +1020,32 @@ public:
 
     /**
      * @brief Reset object the null pointer
-     *
-     * @return int Reference count after releasing the object
      */
-    int reset(std::nullptr_t = nullptr) noexcept
+    void reset(std::nullptr_t = nullptr) noexcept
     {
-        int prev_refcount = 0;
         if(m_obj)
         {
-            prev_refcount = m_obj->Release();
+            m_obj->Release();
             m_obj = nullptr;
         }
-
-        return prev_refcount;
     }
 
     /**
      * @brief Reset object
      *
      * @param obj New object to store
-     *
-     * @return Reference count after releasing the object
      */
-    int reset(handle_type obj)
+    void reset(handle_type obj)
     {
-        int prev_refcount = reset(nullptr);
-
+        if(m_obj)
+            m_obj->Release();
+        m_obj = obj;
         if(obj)
-        {
             obj->AddRef();
-            m_obj = obj;
-        }
-
-        return prev_refcount;
     }
 
 private:
-    asIScriptObject* m_obj = nullptr;
+    handle_type m_obj = nullptr;
 };
 
 /**
@@ -1233,6 +1283,7 @@ private:
 /**
  * @brief Create an AngelScript engine
  */
+[[nodiscard]]
 inline script_engine make_script_engine(
     AS_NAMESPACE_QUALIFIER asDWORD version = ANGELSCRIPT_VERSION
 )
@@ -1303,7 +1354,7 @@ public:
      * @param obj Object to connect
      * @param ti Type information
      *
-     * @note If failed to connect, this helper will be reset to nullptr.
+     * @note If it failed to connect, this helper will be reset to nullptr.
      */
     void connect_object(void* obj, AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
     {
@@ -1318,9 +1369,9 @@ public:
 
     /**
      * @warning If you get the lockable shared bool by `GetWeakRefFlagOfScriptObject()`,
-     *          you should @b not use this function! Because that function won't increase the reference count.
+     *          you should @b not use this function! Because it won't increase the reference count.
      *
-     * @sa reset(inplace_addref_t, handle_type)
+     * @sa connect_object
      */
     void reset(std::in_place_t, handle_type bool_) noexcept
     {
@@ -1353,12 +1404,18 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Lock the flag
+     */
     void lock()
     {
         assert(*this);
         m_bool->Lock();
     }
 
+    /**
+     * @brief Unlock the flag
+     */
     void unlock() noexcept
     {
         assert(*this);
@@ -1518,6 +1575,13 @@ public:
             m_ti->AddRef();
     }
 
+    void reset(std::in_place_t, handle_type ti)
+    {
+        if(m_ti)
+            m_ti->Release();
+        m_ti = ti;
+    }
+
     int type_id() const
     {
         if(!m_ti) [[unlikely]]
@@ -1597,8 +1661,13 @@ public:
         return m_val;
     }
 
-    // Even prefix increment / decrement will return int value directly,
-    // which is similar to how the `std::atomic<T>` does.
+    /**
+     * @name Increment and decrement operators
+     *
+     * Even the prefix increment / decrement will return `int` value directly,
+     * which is similar to how the `std::atomic<T>` does.
+     */
+    /// @{
 
     int operator++() noexcept
     {
@@ -1609,6 +1678,8 @@ public:
     {
         return dec();
     }
+
+    /// @}
 
     /**
      * @brief Decrease reference count. It will call the destroyer if the count reaches 0.
@@ -1626,7 +1697,7 @@ public:
     }
 
     /**
-     * @brief Decrease reference count. It will delete the pointer if the count reaches 0.
+     * @brief Decrease reference count. It will `delete` the pointer if the count reaches 0.
      */
     template <typename T>
     requires(requires(T* ptr) { delete ptr; })
@@ -1684,9 +1755,6 @@ public:
 /**
  * @brief Proxy for the initialization list of AngelScript with repeated values
  *
- * Official documentation:
- * https://www.angelcode.com/angelscript/sdk/docs/manual/doc_reg_basicref.html#doc_reg_basicref_4
- *
  * @warning Never use this proxy with a pattern of limited size, e.g., `{int, int}`
  */
 class script_init_list_repeat
@@ -1699,6 +1767,11 @@ public:
 
     explicit script_init_list_repeat(std::nullptr_t) = delete;
 
+    /**
+     * @brief Construct from the initialization list buffer
+     *
+     * @param list_buf Address of the buffer
+     */
     explicit script_init_list_repeat(void* list_buf) noexcept
     {
         assert(list_buf);
@@ -1707,8 +1780,9 @@ public:
     }
 
     /**
-     * @brief Create a wrapper for script initialization list from for generic calling convention
+     * @brief Construct from the interface for generic calling convention
      *
+     * @param gen The interface for the generic calling convention
      * @param idx The parameter index of the list. Usually, this should be 0 for ordinary types and 1 for template classes.
      */
     explicit script_init_list_repeat(
@@ -1724,12 +1798,18 @@ public:
         return m_data == rhs.data();
     }
 
+    /**
+     * @brief Size of the initialization list
+     */
     [[nodiscard]]
     size_type size() const noexcept
     {
         return m_size;
     }
 
+    /**
+     * @brief Data address of the elements
+     */
     [[nodiscard]]
     void* data() const noexcept
     {
@@ -1737,7 +1817,7 @@ public:
     }
 
     /**
-     * @brief Revert to raw pointer for forwarding list to another function
+     * @brief Revert to raw pointer for forwarding list buffer to another function
      */
     [[nodiscard]]
     void* forward() const noexcept
@@ -1840,8 +1920,8 @@ std::size_t member_offset(T Class::* mp) noexcept
 }
 
 template <typename T>
-requires(std::is_arithmetic_v<T>)
-auto name_of() noexcept
+requires(std::is_arithmetic_v<T> && !std::same_as<std::remove_cv_t<T>, char>)
+consteval auto name_of() noexcept
 {
     if constexpr(std::same_as<T, bool>)
         return meta::fixed_string("bool");
@@ -1892,7 +1972,36 @@ auto name_of() noexcept
 template <typename T>
 concept has_static_name =
     std::is_arithmetic_v<T> &&
-    !std::same_as<T, char>;
+    !std::same_as<std::remove_cv_t<T>, char>;
+
+namespace meta
+{
+    template <typename T>
+    requires(has_static_name<std::remove_cvref_t<T>>)
+    consteval auto full_fixed_name_of()
+    {
+        constexpr bool is_const = std::is_const_v<std::remove_reference_t<T>>;
+
+        constexpr auto type_name = []()
+        {
+            constexpr auto name = name_of<std::remove_cvref_t<T>>();
+            if constexpr(is_const)
+                return fixed_string("const ") + name;
+            else
+                return name;
+        }();
+
+        if constexpr(std::is_reference_v<T>)
+        {
+            if constexpr(is_const)
+                return type_name + fixed_string("&in");
+            else
+                return type_name + fixed_string("&");
+        }
+        else
+            return type_name;
+    }
+} // namespace meta
 
 [[nodiscard]]
 inline auto get_default_factory(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
@@ -1978,6 +2087,83 @@ inline std::strong_ordering translate_opCmp(int cmp) noexcept
         return std::strong_ordering::equivalent;
 }
 
+namespace detail
+{
+    template <typename Fn, typename Tuple>
+    decltype(auto) with_cstr_impl(Fn&& fn, Tuple&& tp)
+    {
+        return std::apply(std::forward<Fn>(fn), std::forward<Tuple>(tp));
+    }
+
+    template <typename Fn, typename Tuple, typename Arg, typename... Args>
+    decltype(auto) with_cstr_impl(Fn&& fn, Tuple&& tp, Arg&& arg, Args&&... args)
+    {
+        if constexpr(std::same_as<std::remove_cvref_t<Arg>, std::string_view>)
+        {
+            if(arg.data()[arg.size()] == '\0')
+            {
+                return with_cstr_impl(
+                    std::forward<Fn>(fn),
+                    std::tuple_cat(
+                        tp,
+                        std::tuple<const char*>(arg.data())
+                    ),
+                    std::forward<Args>(args)...
+                );
+            }
+            else
+            {
+                return with_cstr_impl(
+                    std::forward<Fn>(fn),
+                    std::tuple_cat(
+                        tp,
+                        std::tuple<const char*>(std::string(arg).c_str())
+                    ),
+                    std::forward<Args>(args)...
+                );
+            }
+        }
+        else if constexpr(std::same_as<std::remove_cvref_t<Arg>, std::string>)
+        {
+            return with_cstr_impl(
+                std::forward<Fn>(fn),
+                std::tuple_cat(
+                    tp,
+                    std::tuple<const char*>(arg.c_str())
+                ),
+                std::forward<Args>(args)...
+            );
+        }
+        else
+        {
+            return with_cstr_impl(
+                std::forward<Fn>(fn),
+                std::tuple_cat(
+                    tp,
+                    std::make_tuple<Arg&&>(std::forward<Arg>(arg))
+                ),
+                std::forward<Args>(args)...
+            );
+        }
+    }
+} // namespace detail
+
+/**
+ * @brief This function will convert `string` and `string_view` in parameters to null-terminated `const char*`
+ *        for APIs receiving C-style string.
+ *
+ * @details This function will make a copy of string view if it is not null-terminated.
+ */
+template <typename Fn, typename... Args>
+decltype(auto) with_cstr(Fn&& fn, Args&&... args)
+{
+    return detail::with_cstr_impl(
+        std::forward<Fn>(fn),
+        std::tuple<>(),
+        std::forward<Args>(args)...
+    );
+}
+
 /**
  * @brief Set the script exception to currently active context.
  *
@@ -2001,6 +2187,9 @@ namespace container
 {
     /**
      * @brief Helper for storing a single script object
+     *
+     * @note This helper needs an external type ID for correctly handle the stored data,
+     *       so it is recommended to use this helper as a member of container class, together with a member for storing type ID.
      */
     class single
     {
@@ -2017,6 +2206,10 @@ namespace container
             *this = std::move(other);
         }
 
+        /**
+         * @warning Due to limitations of the AngelScript interface, it won't properly release the stored object.
+         *          Remember to manually clear the stored object before destroying the helper!
+         */
         ~single()
         {
             assert(m_data.ptr == nullptr && "reference not released");
@@ -2034,6 +2227,13 @@ namespace container
 
             return *this;
         }
+
+        /**
+         * @name Get the address of the data
+         *
+         * This can be used to implemented a function that return reference of data to script
+         */
+        /// @{
 
         void* data_address(int type_id)
         {
@@ -2059,10 +2259,14 @@ namespace container
                 return m_data.ptr;
         }
 
+        /// @}
+
         /**
          * @brief Get the referenced object
          *
-         * @note Only available if stored data is @b NOT primitive value
+         * This allows direct interaction with the stored object, whether it's an object handle or not
+         *
+         * @note Only valid if the type of stored data is @b NOT a primitive value
          */
         [[nodiscard]]
         void* object_ref() const noexcept
@@ -2070,6 +2274,14 @@ namespace container
             return m_data.ptr;
         }
 
+        // TODO: API receiving asITypeInfo*
+
+        /**
+         * @brief Construct the stored value using its default constructor
+         *
+         * @param engine Script engine
+         * @param type_id Type ID. Must @b NOT be void (`asTYPEID_VOID`)
+         */
         void construct(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id)
         {
             assert(!is_void_type(type_id));
@@ -2090,6 +2302,15 @@ namespace container
             }
         }
 
+        /**
+         * @brief Copy construct the stored value from another value
+         *
+         * @param engine Script engine
+         * @param type_id Type ID. Must @b NOT be void (`asTYPEID_VOID`)
+         * @param ref Address of the value. Must @b NOT be `nullptr`
+         *
+         * @note Make sure this helper doesn't contain a constructed object previously!
+         */
         void copy_construct(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id, const void* ref)
         {
             assert(!is_void_type(type_id));
@@ -2119,6 +2340,15 @@ namespace container
             }
         }
 
+        /**
+         * @brief Copy assign the stored value from another value
+         *
+         * @param engine Script engine
+         * @param type_id Type ID. Must @b NOT be void (`asTYPEID_VOID`)
+         * @param ref Address of the value. Must @b NOT be `nullptr`
+         *
+         * @note Make sure the stored value is valid!
+         */
         void copy_assign_from(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id, const void* ref)
         {
             assert(!is_void_type(type_id));
@@ -2151,6 +2381,15 @@ namespace container
             }
         }
 
+        /**
+         * @brief Copy assign the stored value to destination
+         *
+         * @param engine Script engine
+         * @param type_id Type ID. Must @b NOT be void (`asTYPEID_VOID`)
+         * @param out Address of the destination. Must @b NOT be `nullptr`
+         *
+         * @note Make sure the stored value is valid!
+         */
         void copy_assign_to(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id, void* out) const
         {
             assert(!is_void_type(type_id));
@@ -2185,6 +2424,12 @@ namespace container
             }
         }
 
+        /**
+         * @brief Destroy the stored object
+         *
+         * @param engine Script engine
+         * @param type_id Type ID. Must @b NOT be void (`asTYPEID_VOID`)
+         */
         void destroy(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id)
         {
             if(is_primitive_type(type_id))
@@ -2203,6 +2448,13 @@ namespace container
             m_data.ptr = nullptr;
         }
 
+        /**
+         * @brief Enumerate references of stored object for GC
+         *
+         * @details This function has no effect for non-garbage collected types
+         *
+         * @param ti Type information
+         */
         void enum_refs(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
         {
             if(!ti) [[unlikely]]
@@ -2437,7 +2689,10 @@ namespace meta
      * @tparam T2 Second member type
      */
     template <typename T1, typename T2>
-    class compressed_pair : public detail::compressed_pair_impl<T1, T2>
+    class compressed_pair
+#ifndef ASBIND20_DOXYGEN
+        : public detail::compressed_pair_impl<T1, T2>
+#endif
     {
         using my_base = detail::compressed_pair_impl<T1, T2>;
 

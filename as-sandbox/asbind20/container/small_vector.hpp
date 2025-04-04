@@ -12,8 +12,9 @@
 #include <cstddef>
 #include <cstring>
 #include <stdexcept>
+#include <algorithm>
 #include "../utility.hpp"
-#include "helper.hpp"
+#include "options.hpp"
 
 namespace asbind20::container
 {
@@ -40,17 +41,31 @@ namespace detail
     };
 } // namespace detail
 
+/**
+ * @brief Sequential container for AngelScript objects with small size optimization (SSO)
+ *
+ * @tparam TypeInfoPolicy Type information policy for element type
+ * @tparam StaticCapcityBytes Static capacity in bytes.
+ *                            Must be aligned with the size of pointer, e.g. `4 * sizeof(void*)`.
+ * @tparam Allocator Allocator type which is able to rebind to multiple types.
+ *                   Its member `pointer_type` must be compatible with raw pointers.
+ *
+ * @details Most members have the same meaning as member functions of the same name in `std::vector`
+ */
 template <
     typeinfo_policy TypeInfoPolicy,
     std::size_t StaticCapacityBytes = 4 * sizeof(void*),
     typename Allocator = as_allocator<void>>
 requires(StaticCapacityBytes > 0)
-class small_vector : detail::small_vector_impl
+class small_vector
+#ifndef ASBIND20_DOXYGEN
+    : private detail::small_vector_impl
+#endif
 {
 public:
     static_assert(
         StaticCapacityBytes % sizeof(void*) == 0,
-        "static storage size must be aligned with size of pointer"
+        "static storage size must be aligned with the size of pointer"
     );
 
     using size_type = std::size_t;
@@ -195,6 +210,35 @@ private:
             }
         }
 
+        void from_ilist(script_init_list_repeat ilist)
+        {
+            assert(size() == 0);
+            reserve(ilist.size());
+
+            value_type* p_elem = static_cast<value_type*>(ilist.data());
+            for(size_type i = 0; i < static_cast<size_type>(ilist.size()); ++i)
+            {
+                *m_p_end = *p_elem;
+                ++m_p_end;
+                ++p_elem;
+            }
+        }
+
+        void copy_from(const impl_storage& other)
+        {
+            assert(this->size() == 0);
+            assert(this != &other);
+            reserve(other.size());
+
+            size_type new_size = other.size();
+            std::memcpy(
+                m_p_begin,
+                other.m_p_begin,
+                new_size * sizeof(value_type)
+            );
+            m_p_end += new_size;
+        }
+
         static consteval size_type max_static_size()
         {
             return StaticCapacityBytes / sizeof(value_type);
@@ -257,6 +301,74 @@ private:
             m_p_capacity = m_p_begin + new_cap;
         }
 
+        void shrink_to_fit()
+        {
+            if(m_p_begin == get_static_storage())
+                return;
+
+            size_type current_size = size();
+            if(current_size <= static_capacity())
+            {
+                std::memcpy(
+                    get_static_storage(),
+                    m_p_begin,
+                    current_size * sizeof(value_type)
+                );
+                std::allocator_traits<allocator_type>::deallocate(
+                    m_alloc.second(), m_p_begin, capacity()
+                );
+                m_p_begin = get_static_storage();
+                m_p_end = m_p_begin + current_size;
+                m_p_capacity = m_p_begin + static_capacity();
+            }
+            else
+            {
+                pointer tmp = std::allocator_traits<allocator_type>::allocate(
+                    m_alloc.second(), current_size
+                );
+                std::memcpy(
+                    tmp,
+                    m_p_begin,
+                    current_size * sizeof(value_type)
+                );
+                std::allocator_traits<allocator_type>::deallocate(
+                    m_alloc.second(), m_p_begin, capacity()
+                );
+
+                m_p_begin = tmp;
+                m_p_end = m_p_begin + current_size;
+                m_p_capacity = m_p_begin + current_size;
+            }
+        }
+
+        void resize(size_type new_size)
+        {
+            size_type old_size = size();
+            if(new_size == old_size)
+                return;
+            else if(new_size == 0)
+            {
+                clear();
+                return;
+            }
+
+            if(new_size > old_size)
+            {
+                reserve(new_size);
+                size_type new_elems = new_size - old_size;
+                std::memset(
+                    m_p_end,
+                    0,
+                    new_elems * sizeof(value_type)
+                );
+                m_p_end += new_elems;
+            }
+            else
+            {
+                m_p_end = m_p_begin + new_size;
+            }
+        }
+
         void clear() noexcept
         {
             m_p_end = m_p_begin;
@@ -272,6 +384,22 @@ private:
         {
             reserve(size() + 1);
             emplace_back_impl(value_type());
+        }
+
+        void push_back_n(size_type n, const void* ref)
+        {
+            reserve(size() + n);
+            m_p_end = std::fill_n(
+                m_p_end, n, *static_cast<const value_type*>(ref)
+            );
+        }
+
+        void emplace_back_n(size_type n)
+        {
+            reserve(size() + n);
+            m_p_end = std::fill_n(
+                m_p_end, n, value_type()
+            );
         }
 
         void pop_back() noexcept
@@ -360,6 +488,46 @@ private:
             m_p_end -= n;
         }
 
+        void assign_one(size_type where, const void* ref)
+        {
+            if(where >= size())
+                throw_out_of_range();
+            m_p_begin[where] = *static_cast<const value_type*>(ref);
+        }
+
+        // Move element to the end of buffer for erasing it later
+        void remove_one(size_type where)
+        {
+            if(where >= size())
+                throw_out_of_range();
+
+            value_type tmp = m_p_begin[where];
+            size_type elem_to_move = size() - where - 1;
+            std::memmove(
+                m_p_begin + where,
+                m_p_begin + where + 1,
+                elem_to_move * sizeof(value_type)
+            );
+            *(m_p_end - 1) = tmp;
+        }
+
+        void reverse(size_type start, size_type n)
+        {
+            if(start >= size())
+                throw_out_of_range();
+            n = std::min(size() - start, n);
+            if(n == 0) [[unlikely]]
+                return;
+
+            std::reverse(
+                m_p_begin + start,
+                m_p_begin + start + n
+            );
+        }
+
+        // Placeholder
+        void enum_refs() {}
+
     protected:
         pointer get_static_storage() noexcept
         {
@@ -408,6 +576,47 @@ private:
             clear();
         }
 
+        void from_ilist(script_init_list_repeat ilist)
+        {
+            assert(this->size() == 0);
+
+            AS_NAMESPACE_QUALIFIER asITypeInfo* subtype_ti = this->elem_type_info();
+            auto flags = subtype_ti->GetFlags();
+            if constexpr(!IsHandle)
+            {
+                if(flags & AS_NAMESPACE_QUALIFIER asOBJ_VALUE)
+                {
+                    this->reserve(ilist.size());
+
+                    AS_NAMESPACE_QUALIFIER asIScriptEngine* engine = subtype_ti->GetEngine();
+                    size_type elem_size = subtype_ti->GetSize();
+                    std::byte* p_elem = static_cast<std::byte*>(ilist.data());
+                    for(size_type i = 0; i < static_cast<size_type>(ilist.size()); ++i)
+                    {
+                        *this->m_p_end = engine->CreateScriptObjectCopy(p_elem, subtype_ti);
+                        ++this->m_p_end;
+                        p_elem += elem_size;
+                    }
+
+                    return;
+                }
+            }
+
+            my_base::from_ilist(ilist);
+            // Set the original list to 0, preventing it from being double freed.
+            std::memset(ilist.data(), 0, ilist.size() * sizeof(void*));
+        }
+
+        void copy_from(const impl_object& other)
+        {
+            assert(this->size() == 0);
+            assert(this != &other);
+            this->reserve(other.size());
+
+            for(size_type i = 0; i < other.size(); ++i)
+                this->emplace_back_impl(other.value_ref_at(i));
+        }
+
         void* value_ref_at(size_type idx) const
         {
             if(idx >= this->size())
@@ -418,10 +627,54 @@ private:
                 return this->m_p_begin[idx];
         }
 
+        void resize(size_type new_size)
+        {
+            size_type old_size = this->size();
+            if(new_size == old_size)
+                return;
+            else if(new_size == 0)
+            {
+                clear();
+                return;
+            }
+
+            if(new_size > old_size)
+            {
+                this->reserve(new_size);
+                size_type new_elems = new_size - old_size;
+
+                if constexpr(IsHandle)
+                {
+                    std::memset(
+                        this->m_p_end,
+                        0,
+                        new_elems * sizeof(value_type)
+                    );
+                    this->m_p_end += new_elems;
+                }
+                else
+                {
+                    AS_NAMESPACE_QUALIFIER asITypeInfo* ti = this->elem_type_info();
+                    AS_NAMESPACE_QUALIFIER asIScriptEngine* engine = ti->GetEngine();
+                    assert(ti != nullptr);
+
+                    for(size_type i = 0; i < new_elems; ++i)
+                    {
+                        *this->m_p_end = engine->CreateScriptObject(ti);
+                        ++this->m_p_end;
+                    }
+                }
+            }
+            else
+            {
+                erase_n(new_size, size_type(-1));
+            }
+        }
+
         void clear() noexcept
         {
             release_obj_n(this->m_p_begin, this->size());
-            this->m_p_end = this->m_p_end;
+            this->m_p_end = this->m_p_begin;
         }
 
         void push_back(const void* ref)
@@ -448,6 +701,42 @@ private:
 
                 *this->m_p_end = ti->GetEngine()->CreateScriptObject(ti);
                 ++this->m_p_end;
+            }
+        }
+
+        void push_back_n(size_type n, const void* ref)
+        {
+            this->reserve(this->size() + n);
+            AS_NAMESPACE_QUALIFIER asITypeInfo* ti = this->elem_type_info();
+            AS_NAMESPACE_QUALIFIER asIScriptEngine* engine = ti->GetEngine();
+
+            for(size_type i = 0; i < n; ++i)
+            {
+                void* obj = copy_obj_impl(engine, ti, ref_to_obj(ref));
+                *this->m_p_end = obj;
+
+                ++this->m_p_end;
+            }
+        }
+
+        void emplace_back_n(size_type n)
+        {
+            if constexpr(IsHandle)
+            {
+                my_base::emplace_back_n(n);
+            }
+            else
+            {
+                this->reserve(this->size() + n);
+                AS_NAMESPACE_QUALIFIER asITypeInfo* ti = this->elem_type_info();
+                AS_NAMESPACE_QUALIFIER asIScriptEngine* engine = ti->GetEngine();
+                assert(ti != nullptr);
+
+                for(size_type i = 0; i < n; ++i)
+                {
+                    *this->m_p_end = engine->CreateScriptObject(ti);
+                    ++this->m_p_end;
+                }
             }
         }
 
@@ -553,6 +842,43 @@ private:
             this->m_p_end -= n;
         }
 
+        void assign_one(size_type where, const void* ref)
+        {
+            if(where >= this->size())
+                throw_out_of_range();
+
+            assign_obj(this->m_p_begin[where], ref_to_obj(ref));
+        }
+
+        void enum_refs()
+        {
+            AS_NAMESPACE_QUALIFIER asITypeInfo* ti = this->elem_type_info();
+            auto* engine = ti->GetEngine();
+
+            auto flags = ti->GetFlags();
+            if(flags & AS_NAMESPACE_QUALIFIER asOBJ_REF)
+            {
+                for(auto it = this->m_p_begin; it != this->m_p_end; ++it)
+                {
+                    void* obj = *it;
+                    if(!obj)
+                        continue;
+                    engine->GCEnumCallback(obj);
+                }
+            }
+            else if((flags & AS_NAMESPACE_QUALIFIER asOBJ_VALUE) &&
+                    (flags & AS_NAMESPACE_QUALIFIER asOBJ_GC))
+            {
+                for(auto it = this->m_p_begin; it != this->m_p_end; ++it)
+                {
+                    void* obj = *it;
+                    if(!obj)
+                        continue;
+                    engine->ForwardGCEnumReferences(obj, ti);
+                }
+            }
+        }
+
     private:
         static void* ref_to_obj(const void* ref) noexcept
         {
@@ -563,22 +889,67 @@ private:
         }
 
         // NOTE: Call ref_to_obj to convert the pointer at first!
-        void* copy_obj(void* obj) const
+        static void* copy_obj_impl(
+            AS_NAMESPACE_QUALIFIER asIScriptEngine* engine,
+            AS_NAMESPACE_QUALIFIER asITypeInfo* ti,
+            void* obj
+        )
         {
-            AS_NAMESPACE_QUALIFIER asITypeInfo* ti = this->elem_type_info();
-            assert(ti != nullptr);
-
             if constexpr(IsHandle)
             {
                 if(!obj)
                     return nullptr;
-                ti->GetEngine()->AddRefScriptObject(obj, ti);
+                engine->AddRefScriptObject(obj, ti);
                 return obj;
             }
             else
             {
                 assert(obj != nullptr);
-                return ti->GetEngine()->CreateScriptObjectCopy(obj, ti);
+                return engine->CreateScriptObjectCopy(obj, ti);
+            }
+        }
+
+        // NOTE: Call ref_to_obj to convert the pointer at first!
+        void* copy_obj(void* obj) const
+        {
+            AS_NAMESPACE_QUALIFIER asITypeInfo* ti = this->elem_type_info();
+            AS_NAMESPACE_QUALIFIER asIScriptEngine* engine = ti->GetEngine();
+            assert(ti != nullptr);
+
+            return copy_obj_impl(engine, ti, obj);
+        }
+
+        // NOTE: Call ref_to_obj to convert the pointer at first!
+        void assign_obj(void*& dst, void* obj)
+        {
+            AS_NAMESPACE_QUALIFIER asITypeInfo* ti = this->elem_type_info();
+            AS_NAMESPACE_QUALIFIER asIScriptEngine* engine = ti->GetEngine();
+
+            if(dst)
+            {
+                if constexpr(IsHandle)
+                {
+                    engine->ReleaseScriptObject(dst, ti);
+                    engine->AddRefScriptObject(obj, ti);
+                    dst = obj;
+                }
+                else
+                {
+                    engine->AssignScriptObject(dst, obj, ti);
+                }
+            }
+            else
+            {
+                if constexpr(IsHandle)
+                {
+                    engine->AddRefScriptObject(obj, ti);
+                    dst = obj;
+                }
+                else
+                {
+                    assert(obj != nullptr);
+                    dst = engine->CreateScriptObjectCopy(obj, ti);
+                }
             }
         }
 
@@ -728,26 +1099,33 @@ case AS_NAMESPACE_QUALIFIER as_type_id:                                         
     }
 
     template <typename... Args>
-    void init_impl(int type_id, AS_NAMESPACE_QUALIFIER asITypeInfo* ti, Args&&... args)
+    void init_impl(
+        int type_id, AS_NAMESPACE_QUALIFIER asITypeInfo* ti, script_init_list_repeat* ilist = nullptr
+    )
     {
         assert(!is_void_type(type_id));
+
+        auto helper = [&]<typename ImplType>(std::in_place_type_t<ImplType>)
+        {
+            new(m_impl_data) ImplType(type_id, ti);
+            if(ilist)
+                reinterpret_cast<ImplType*>(m_impl_data)->from_ilist(*ilist);
+        };
 
         if(!is_primitive_type(type_id))
         {
             if(is_objhandle(type_id))
-                new(m_impl_data) impl_object<true>(type_id, ti, std::forward<Args>(args)...);
+                helper(std::in_place_type<impl_object<true>>);
             else
-                new(m_impl_data) impl_object<false>(type_id, ti, std::forward<Args>(args)...);
+                helper(std::in_place_type<impl_object<false>>);
             return;
         }
 
         switch(type_id)
         {
-#define ASBIND20_SMALL_VECTOR_IMPL_CASE(as_type_id) \
-case AS_NAMESPACE_QUALIFIER as_type_id:             \
-    new(m_impl_data) impl_primitive<as_type_id>(    \
-        type_id, ti, std::forward<Args>(args)...    \
-    );                                              \
+#define ASBIND20_SMALL_VECTOR_IMPL_CASE(as_type_id)         \
+case AS_NAMESPACE_QUALIFIER as_type_id:                     \
+    helper(std::in_place_type<impl_primitive<as_type_id>>); \
     break
 
             ASBIND20_SMALL_VECTOR_IMPL_CASE(asTYPEID_BOOL);
@@ -764,7 +1142,7 @@ case AS_NAMESPACE_QUALIFIER as_type_id:             \
 
         default:
             assert(is_enum_type(type_id));
-            new(m_impl_data) impl_enum(type_id, ti, std::forward<Args>(args)...);
+            helper(std::in_place_type<impl_enum>);
             break;
 
 #undef ASBIND20_SMALL_VECTOR_IMPL_CASE
@@ -784,6 +1162,15 @@ public:
         );
     }
 
+    small_vector(const small_vector& other)
+    {
+        init_impl(other.element_type_id(), other.get_type_info());
+        visit_impl(
+            [&]<typename ImplType>(ImplType& impl)
+            { impl.copy_from(static_cast<const ImplType&>(other.impl())); }
+        );
+    }
+
     explicit small_vector(AS_NAMESPACE_QUALIFIER asITypeInfo* ti)
     {
         init_impl(
@@ -791,7 +1178,16 @@ public:
         );
     }
 
-    explicit small_vector(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id)
+    small_vector(
+        AS_NAMESPACE_QUALIFIER asITypeInfo* ti, script_init_list_repeat ilist
+    )
+    {
+        init_impl(
+            TypeInfoPolicy::get_type_id(ti), ti, &ilist
+        );
+    }
+
+    small_vector(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, int type_id)
     {
         if(is_primitive_type(type_id) && !is_enum_type(type_id))
             init_impl(type_id, nullptr);
@@ -804,23 +1200,41 @@ public:
         }
     }
 
-    auto get_type_info() const
+    /**
+     * @name Type information
+     */
+
+    /// @{
+
+    [[nodiscard]]
+    auto get_type_info() const noexcept
         -> AS_NAMESPACE_QUALIFIER asITypeInfo*
     {
         return impl().get_type_info();
     }
 
+    [[nodiscard]]
     auto element_type_info() const
         -> AS_NAMESPACE_QUALIFIER asITypeInfo*
     {
         return TypeInfoPolicy::get_type_info(get_type_info());
     }
 
+    [[nodiscard]]
     int element_type_id() const
     {
         return impl().elem_type_id();
     }
 
+    /// @}
+
+    /**
+     * @name Capacity
+     */
+
+    /// @{
+
+    [[nodiscard]]
     size_type static_capacity() const noexcept
     {
         return visit_impl(
@@ -829,6 +1243,7 @@ public:
         );
     }
 
+    [[nodiscard]]
     size_type capacity() const noexcept
     {
         return visit_impl(
@@ -837,6 +1252,23 @@ public:
         );
     }
 
+    void reserve(size_type new_cap)
+    {
+        return visit_impl(
+            [new_cap](auto& impl)
+            { return impl.reserve(new_cap); }
+        );
+    }
+
+    void shrink_to_fit()
+    {
+        return visit_impl(
+            [](auto& impl)
+            { return impl.shrink_to_fit(); }
+        );
+    }
+
+    [[nodiscard]]
     size_type size() const noexcept
     {
         return visit_impl(
@@ -845,19 +1277,21 @@ public:
         );
     }
 
-    void clear() noexcept
-    {
-        return visit_impl(
-            [](auto& impl)
-            { return impl.clear(); }
-        );
-    }
-
+    [[nodiscard]]
     bool empty() const noexcept
     {
         return size() == 0;
     }
 
+    /// @}
+
+    /**
+     * @name Element access
+     */
+
+    /// @{
+
+    [[nodiscard]]
     void* data() noexcept
     {
         return visit_impl(
@@ -866,6 +1300,7 @@ public:
         );
     }
 
+    [[nodiscard]]
     const void* data() const noexcept
     {
         return visit_impl(
@@ -890,33 +1325,23 @@ public:
         );
     }
 
-    void push_back(const void* ref)
-    {
-        return visit_impl(
-            [ref](auto& impl)
-            { return impl.push_back(ref); }
-        );
-    }
+    /// @}
 
-    void emplace_back()
-    {
-        return visit_impl(
-            [](auto& impl)
-            { return impl.emplace_back(); }
-        );
-    }
+    /**
+     * @name Iterators of small vector
+     */
 
-    void pop_back() noexcept
-    {
-        return visit_impl(
-            [](auto& impl)
-            { return impl.pop_back(); }
-        );
-    }
+    /// @{
 
     class iterator;
 
-    class const_iterator : private impl_interface::iterator_interface
+    /**
+     * @brief Const iterator of small vector
+     */
+    class const_iterator
+#ifndef ASBIND20_DOXYGEN
+        : private impl_interface::iterator_interface
+#endif
     {
         friend iterator;
         friend small_vector;
@@ -1065,6 +1490,70 @@ public:
         return cend();
     }
 
+    /// @}
+
+    /**
+     * @name Modifiers
+     */
+
+    /// @{
+
+    void resize(size_type new_size)
+    {
+        return visit_impl(
+            [new_size](auto& impl)
+            { return impl.resize(new_size); }
+        );
+    }
+
+    void clear() noexcept
+    {
+        return visit_impl(
+            [](auto& impl)
+            { return impl.clear(); }
+        );
+    }
+
+    void push_back(const void* ref)
+    {
+        return visit_impl(
+            [ref](auto& impl)
+            { return impl.push_back(ref); }
+        );
+    }
+
+    void emplace_back()
+    {
+        return visit_impl(
+            [](auto& impl)
+            { return impl.emplace_back(); }
+        );
+    }
+
+    void push_back_n(size_type n, const void* ref)
+    {
+        return visit_impl(
+            [n, ref](auto& impl)
+            { return impl.push_back_n(n, ref); }
+        );
+    }
+
+    void emplace_back_n(size_type n)
+    {
+        return visit_impl(
+            [n](auto& impl)
+            { return impl.emplace_back_n(n); }
+        );
+    }
+
+    void pop_back() noexcept
+    {
+        return visit_impl(
+            [](auto& impl)
+            { return impl.pop_back(); }
+        );
+    }
+
     void insert(size_type where, const void* ref)
     {
         return visit_impl(
@@ -1108,6 +1597,37 @@ public:
         this->erase(where.get_offset(), 1);
     }
 
+    size_type remove(size_type where)
+    {
+        visit_impl(
+            [where](auto& impl)
+            { impl.remove_one(where); }
+        );
+        return where;
+    }
+
+    void assign(size_type where, const void* ref)
+    {
+        return visit_impl(
+            [where, ref](auto& impl)
+            { return impl.assign_one(where, ref); }
+        );
+    }
+
+    void assign(const_iterator where, const void* ref)
+    {
+        return assign(where.get_offset(), ref);
+    }
+
+    void reverse(size_type start, size_type n = -1)
+    {
+        return visit_impl(
+            [start, n](auto& impl)
+            { return impl.reverse(start, n); }
+        );
+    }
+
+    [[nodiscard]]
     void* data_at(size_type idx) noexcept
     {
         return visit_impl(
@@ -1116,6 +1636,7 @@ public:
         );
     }
 
+    [[nodiscard]]
     const void* data_at(size_type idx) const noexcept
     {
         return visit_impl(
@@ -1123,6 +1644,14 @@ public:
             { return impl.data_at(idx); }
         );
     }
+
+    /// @}
+
+    /**
+     * @name Visiting members
+     */
+
+    /// @{
 
     template <typename Visitor>
     decltype(auto) visit(Visitor&& vis, size_type start, size_type count)
@@ -1149,6 +1678,19 @@ public:
             element_type_id(),
             data_at(start.get_offset()),
             data_at(stop.get_offset())
+        );
+    }
+
+    /// @}
+
+    /**
+     * @brief Enumerate references for GC
+     */
+    void enum_refs()
+    {
+        return visit_impl(
+            [](auto& impl)
+            { return impl.enum_refs(); }
         );
     }
 };

@@ -18,11 +18,6 @@
 
 namespace asbind20
 {
-struct this_type_t
-{};
-
-inline constexpr this_type_t this_type{};
-
 template <typename T>
 class auxiliary_wrapper
 {
@@ -142,35 +137,49 @@ public:
     namespace_(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine)
         : m_engine(engine), m_prev(engine->GetDefaultNamespace())
     {
-        m_engine->SetDefaultNamespace("");
+        set_ns_impl("");
     }
 
     namespace_(
         AS_NAMESPACE_QUALIFIER asIScriptEngine* engine,
-        const char* ns,
+        std::string_view ns,
         bool nested = true
     )
         : m_engine(engine), m_prev(engine->GetDefaultNamespace())
     {
         if(nested)
         {
-            if(ns[0] != '\0') [[likely]]
+            if(!ns.empty()) [[likely]]
             {
                 if(m_prev.empty())
-                    m_engine->SetDefaultNamespace(ns);
+                {
+                    with_cstr(
+                        [this](const char* ns)
+                        { set_ns_impl(ns); },
+                        ns
+                    );
+                }
                 else
-                    m_engine->SetDefaultNamespace(string_concat(m_prev, "::", ns).c_str());
+                {
+                    set_ns_impl(
+                        string_concat(m_prev, "::", ns).c_str()
+                    );
+                }
             }
         }
         else
         {
-            m_engine->SetDefaultNamespace(ns);
+            with_cstr(
+                [this](const char* ns)
+                { set_ns_impl(ns); },
+                ns
+            );
         }
     }
 
     ~namespace_()
     {
-        m_engine->SetDefaultNamespace(m_prev.c_str());
+        set_ns_impl(m_prev.c_str());
     }
 
     [[nodiscard]]
@@ -183,6 +192,15 @@ public:
 private:
     AS_NAMESPACE_QUALIFIER asIScriptEngine* m_engine;
     std::string m_prev;
+
+    void set_ns_impl(const char* ns)
+    {
+        [[maybe_unused]]
+        int r = m_engine->SetDefaultNamespace(
+            ns
+        );
+        assert(r >= 0);
+    }
 };
 
 struct use_generic_t
@@ -1878,7 +1896,7 @@ namespace detail
 
         We'll support STDCALL in future version if anyone need it.
         */
-        return asCALL_CDECL;
+        return AS_NAMESPACE_QUALIFIER asCALL_CDECL;
     }
 
     template <typename T, typename Class>
@@ -2038,6 +2056,14 @@ namespace detail
     }
 } // namespace detail
 
+namespace wrappers
+{
+    template <typename T, typename RegisterHelper>
+    concept auto_register = requires(T&& ar, RegisterHelper& c) {
+        ar(c);
+    };
+} // namespace wrappers
+
 template <bool ForceGeneric>
 class global final : public register_helper_base<ForceGeneric>
 {
@@ -2070,7 +2096,7 @@ public:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>
     requires(CallConv != AS_NAMESPACE_QUALIFIER asCALL_GENERIC)
     global& function(
-        const char* decl,
+        std::string_view decl,
         Fn&& fn,
         call_conv_t<CallConv>
     ) requires(!ForceGeneric)
@@ -2081,11 +2107,16 @@ public:
         );
 
         [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterGlobalFunction(
-            decl,
-            to_asSFuncPtr(fn),
-            CallConv
+        int r = with_cstr(
+            [this, &fn](const char* decl)
+            {
+                return m_engine->RegisterGlobalFunction(
+                    decl,
+                    to_asSFuncPtr(fn),
+                    CallConv
+                );
+            },
+            decl
         );
         assert(r >= 0);
 
@@ -2094,7 +2125,7 @@ public:
 
     template <native_function Fn>
     global& function(
-        const char* decl,
+        std::string_view decl,
         Fn&& fn
     ) requires(!ForceGeneric)
     {
@@ -2107,17 +2138,22 @@ public:
     }
 
     global& function(
-        const char* decl,
+        std::string_view decl,
         AS_NAMESPACE_QUALIFIER asGENFUNC_t gfn,
         call_conv_t<AS_NAMESPACE_QUALIFIER asCALL_GENERIC> = {}
     )
     {
         [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterGlobalFunction(
-            decl,
-            to_asSFuncPtr(gfn),
-            AS_NAMESPACE_QUALIFIER asCALL_GENERIC
+        int r = with_cstr(
+            [this, &gfn](const char* decl)
+            {
+                return m_engine->RegisterGlobalFunction(
+                    decl,
+                    to_asSFuncPtr(gfn),
+                    AS_NAMESPACE_QUALIFIER asCALL_GENERIC
+                );
+            },
+            decl
         );
         assert(r >= 0);
 
@@ -2129,7 +2165,7 @@ public:
         asECallConvTypes CallConv>
     global& function(
         use_generic_t,
-        const char* decl,
+        std::string_view decl,
         fp_wrapper_t<Function>,
         call_conv_t<CallConv>
     )
@@ -2153,7 +2189,7 @@ public:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>
     requires(CallConv != AS_NAMESPACE_QUALIFIER asCALL_GENERIC)
     global& function(
-        const char* decl,
+        std::string_view decl,
         fp_wrapper_t<Function>,
         call_conv_t<CallConv>
     )
@@ -2178,7 +2214,7 @@ public:
     template <auto Function>
     global& function(
         use_generic_t,
-        const char* decl,
+        std::string_view decl,
         fp_wrapper_t<Function>
     )
     {
@@ -2192,7 +2228,7 @@ public:
 
     template <auto Function>
     global& function(
-        const char* decl,
+        std::string_view decl,
         fp_wrapper_t<Function>
     )
     {
@@ -2214,7 +2250,7 @@ public:
     template <noncapturing_lambda Lambda>
     global& function(
         use_generic_t,
-        const char* decl,
+        std::string_view decl,
         const Lambda&
     )
     {
@@ -2229,7 +2265,7 @@ public:
 
     template <noncapturing_lambda Lambda>
     global& function(
-        const char* decl,
+        std::string_view decl,
         const Lambda&
     )
     {
@@ -2243,19 +2279,24 @@ public:
 
     template <typename Auxiliary>
     global& function(
-        const char* decl,
+        std::string_view decl,
         AS_NAMESPACE_QUALIFIER asGENFUNC_t gfn,
         auxiliary_wrapper<Auxiliary> aux,
         call_conv_t<AS_NAMESPACE_QUALIFIER asCALL_GENERIC> = {}
     )
     {
         [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterGlobalFunction(
-            decl,
-            to_asSFuncPtr(gfn),
-            AS_NAMESPACE_QUALIFIER asCALL_GENERIC,
-            get_auxiliary_address(aux)
+        int r = with_cstr(
+            [this, &gfn, &aux](const char* decl)
+            {
+                return m_engine->RegisterGlobalFunction(
+                    decl,
+                    to_asSFuncPtr(gfn),
+                    AS_NAMESPACE_QUALIFIER asCALL_GENERIC,
+                    get_auxiliary_address(aux)
+                );
+            },
+            decl
         );
         assert(r >= 0);
 
@@ -2265,19 +2306,24 @@ public:
     template <typename Fn, typename Auxiliary>
     requires(std::is_member_function_pointer_v<Fn>)
     global& function(
-        const char* decl,
+        std::string_view decl,
         Fn&& fn,
         auxiliary_wrapper<Auxiliary> aux,
         call_conv_t<AS_NAMESPACE_QUALIFIER asCALL_THISCALL_ASGLOBAL> = {}
     ) requires(!ForceGeneric)
     {
         [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterGlobalFunction(
-            decl,
-            to_asSFuncPtr(fn),
-            AS_NAMESPACE_QUALIFIER asCALL_THISCALL_ASGLOBAL,
-            get_auxiliary_address(aux)
+        int r = with_cstr(
+            [this, &fn, &aux](const char* decl)
+            {
+                return m_engine->RegisterGlobalFunction(
+                    decl,
+                    to_asSFuncPtr(fn),
+                    AS_NAMESPACE_QUALIFIER asCALL_THISCALL_ASGLOBAL,
+                    get_auxiliary_address(aux)
+                );
+            },
+            decl
         );
         assert(r >= 0);
 
@@ -2289,7 +2335,7 @@ public:
         typename Auxiliary>
     global& function(
         use_generic_t,
-        const char* decl,
+        std::string_view decl,
         fp_wrapper_t<Function>,
         auxiliary_wrapper<Auxiliary> aux,
         call_conv_t<AS_NAMESPACE_QUALIFIER asCALL_THISCALL_ASGLOBAL> = {}
@@ -2314,7 +2360,7 @@ public:
         auto Function,
         typename Auxiliary>
     global& function(
-        const char* decl,
+        std::string_view decl,
         fp_wrapper_t<Function>,
         auxiliary_wrapper<Auxiliary> aux,
         call_conv_t<AS_NAMESPACE_QUALIFIER asCALL_THISCALL_ASGLOBAL> = {}
@@ -2333,89 +2379,21 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Register a global property
+     */
     template <typename T>
     global& property(
-        const char* decl,
+        std::string_view decl,
         T& val
     )
     {
         [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterGlobalProperty(
-            decl, (void*)std::addressof(val)
-        );
-        assert(r >= 0);
-
-        return *this;
-    }
-
-    global& funcdef(
-        const char* decl
-    )
-    {
-        [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterFuncdef(decl);
-        assert(r >= 0);
-
-        return *this;
-    }
-
-    global& typedef_(
-        const char* type_decl,
-        const char* new_name
-    )
-    {
-        [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterTypedef(new_name, type_decl);
-        assert(r >= 0);
-
-        return *this;
-    }
-
-    // For those who feel more comfortable with the C++11 style `using alias = type`
-    global& using_(
-        const char* new_name,
-        const char* type_decl
-    )
-    {
-        typedef_(type_decl, new_name);
-
-        return *this;
-    }
-
-    global& enum_type(
-        const char* type
-    )
-    {
-        [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterEnum(type);
-        assert(r >= 0);
-
-        return *this;
-    }
-
-    template <typename Enum>
-    requires std::is_enum_v<Enum>
-    global& enum_value(
-        const char* type,
-        Enum val,
-        const char* name
-    )
-    {
-        static_assert(
-            sizeof(Enum) <= sizeof(int),
-            "Enum size too large"
-        );
-
-        [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterEnumValue(
-            type,
-            name,
-            static_cast<int>(val)
+        int r = with_cstr(
+            &AS_NAMESPACE_QUALIFIER asIScriptEngine::RegisterGlobalProperty,
+            m_engine,
+            decl,
+            (void*)std::addressof(val)
         );
         assert(r >= 0);
 
@@ -2423,13 +2401,75 @@ public:
     }
 
     /**
-     * Generic calling convention for message callback is not supported.
+     * @brief Register a funcdef
+     *
+     * @param decl Function declaration
+     */
+    global& funcdef(
+        std::string_view decl
+    )
+    {
+        [[maybe_unused]]
+        int r = with_cstr(
+            &AS_NAMESPACE_QUALIFIER asIScriptEngine::RegisterFuncdef,
+            m_engine,
+            decl
+        );
+        assert(r >= 0);
+
+        return *this;
+    }
+
+    /**
+     * @brief Register a typedef
+     *
+     * @param type_decl Type declaration
+     * @param new_name Aliased type name
+     */
+    global& typedef_(
+        std::string_view type_decl,
+        std::string_view new_name
+    )
+    {
+        [[maybe_unused]]
+        int r = with_cstr(
+            &AS_NAMESPACE_QUALIFIER asIScriptEngine::RegisterTypedef,
+            m_engine,
+            new_name,
+            type_decl
+        );
+        assert(r >= 0);
+
+        return *this;
+    }
+
+    /**
+     * @brief Register a typedef in C++11 style
+     *
+     * @param new_name Aliased type name
+     * @param type_decl Type declaration
+     */
+    global& using_(
+        std::string_view new_name,
+        std::string_view type_decl
+    )
+    {
+        typedef_(type_decl, new_name);
+
+        return *this;
+    }
+
+    /**
+     * @brief Generic calling convention for message callback is not supported.
      */
     global& message_callback(
         AS_NAMESPACE_QUALIFIER asGENFUNC_t gfn,
         void* obj = nullptr
     ) = delete;
 
+    /**
+     * @brief Set the message callback.
+     */
     template <native_function Callback>
     requires(!std::is_member_function_pointer_v<std::decay_t<Callback>>)
     global& message_callback(Callback fn, void* obj = nullptr)
@@ -2446,6 +2486,9 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set a member function as the message callback.
+     */
     template <native_function Callback, typename T>
     requires(std::is_member_function_pointer_v<std::decay_t<Callback>>)
     global& message_callback(Callback fn, T& obj)
@@ -2463,13 +2506,16 @@ public:
     }
 
     /**
-     * Generic calling convention for exception translator is not supported.
+     * @brief Generic calling convention for exception translator is not supported.
      */
     global& exception_translator(
         AS_NAMESPACE_QUALIFIER asGENFUNC_t gfn,
         void* obj = nullptr
     ) = delete;
 
+    /**
+     * @brief Set the exception translator.
+     */
     template <native_function Callback>
     requires(!std::is_member_function_pointer_v<std::decay_t<Callback>>)
     global& exception_translator(Callback fn, void* obj = nullptr)
@@ -2486,6 +2532,9 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set a member function as the exception translator.
+     */
     template <native_function Callback, typename T>
     requires(std::is_member_function_pointer_v<std::decay_t<Callback>>)
     global& exception_translator(Callback fn, T& obj)
@@ -2503,14 +2552,14 @@ public:
     }
 };
 
-global(asIScriptEngine*) -> global<false>;
+global(AS_NAMESPACE_QUALIFIER asIScriptEngine*) -> global<false>;
 
 global(const script_engine&) -> global<false>;
 
 namespace detail
 {
     inline std::string generate_member_funcdef(
-        const char* type, std::string_view funcdef
+        std::string_view type, std::string_view funcdef
     )
     {
         // Firstly, find the begin of parameters
@@ -2581,16 +2630,22 @@ public:
         }
     }
 
+    [[nodiscard]]
+    const std::string& get_name() const noexcept
+    {
+        return m_name;
+    }
+
 protected:
     using my_base::m_engine;
-    const char* m_name;
+    std::string m_name;
     int m_this_type_id = 0; // asTYPEID_VOID
 
     class_register_helper_base() = delete;
     class_register_helper_base(const class_register_helper_base&) = default;
 
-    class_register_helper_base(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, const char* name)
-        : my_base(engine), m_name(name) {}
+    class_register_helper_base(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, std::string name)
+        : my_base(engine), m_name(std::move(name)) {}
 
     template <typename Class>
     void register_object_type(AS_NAMESPACE_QUALIFIER asQWORD flags)
@@ -2598,7 +2653,7 @@ protected:
         [[maybe_unused]]
         int r = 0;
         r = m_engine->RegisterObjectType(
-            m_name,
+            m_name.c_str(),
             static_cast<int>(sizeof(Class)),
             flags
         );
@@ -2610,17 +2665,22 @@ protected:
 
     template <typename Fn, AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>
     void method_impl(
-        const char* decl, Fn&& fn, call_conv_t<CallConv>, void* aux = nullptr
+        std::string_view decl, Fn&& fn, call_conv_t<CallConv>, void* aux = nullptr
     ) requires(!ForceGeneric)
     {
         [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterObjectMethod(
-            m_name,
-            decl,
-            to_asSFuncPtr(fn),
-            CallConv,
-            aux
+        int r = with_cstr(
+            [this, &fn, &aux](const char* decl)
+            {
+                return m_engine->RegisterObjectMethod(
+                    m_name.c_str(),
+                    decl,
+                    to_asSFuncPtr(fn),
+                    CallConv,
+                    aux
+                );
+            },
+            decl
         );
         assert(r >= 0);
     }
@@ -2629,20 +2689,25 @@ protected:
     // MSVC needs this to produce correct result.
     // 2025-2-21: Tested with MSVC 19.42.34436
     void method_impl(
-        const char* decl,
+        std::string_view decl,
         AS_NAMESPACE_QUALIFIER asGENFUNC_t gfn,
         call_conv_t<AS_NAMESPACE_QUALIFIER asCALL_GENERIC>,
         void* aux = nullptr
     )
     {
         [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterObjectMethod(
-            m_name,
-            decl,
-            to_asSFuncPtr(gfn),
-            AS_NAMESPACE_QUALIFIER asCALL_GENERIC,
-            aux
+        int r = with_cstr(
+            [this, &gfn, &aux](const char* decl)
+            {
+                return m_engine->RegisterObjectMethod(
+                    m_name.c_str(),
+                    decl,
+                    to_asSFuncPtr(gfn),
+                    AS_NAMESPACE_QUALIFIER asCALL_GENERIC,
+                    aux
+                );
+            },
+            decl
         );
         assert(r >= 0);
     }
@@ -2661,7 +2726,7 @@ protected:
         [[maybe_unused]]
         int r = 0;
         r = m_engine->RegisterObjectBehaviour(
-            m_name,
+            m_name.c_str(),
             beh,
             decl,
             to_asSFuncPtr(fn),
@@ -2671,20 +2736,26 @@ protected:
         assert(r >= 0);
     }
 
-    void property_impl(const char* decl, std::size_t off)
+    void property_impl(std::string_view decl, std::size_t off)
     {
         [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterObjectProperty(
-            m_name,
-            decl,
-            static_cast<int>(off)
+        int r = with_cstr(
+            [this, off](const char* decl)
+            {
+                return m_engine->RegisterObjectProperty(
+                    m_name.c_str(),
+                    decl,
+                    static_cast<int>(off)
+                );
+            },
+            decl
         );
         assert(r >= 0);
     }
 
-    template <typename T, typename Class>
-    void property_impl(const char* decl, T Class::* mp)
+    template <typename MemberPointer>
+    requires(std::is_member_object_pointer_v<MemberPointer>)
+    void property_impl(std::string_view decl, MemberPointer mp)
     {
         property_impl(decl, member_offset(mp));
     }
@@ -3049,7 +3120,7 @@ private:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                   \
     requires(CallConv != AS_NAMESPACE_QUALIFIER asCALL_GENERIC)             \
     register_type& method(                                                  \
-        const char* decl,                                                   \
+        std::string_view decl,                                              \
         Fn&& fn,                                                            \
         call_conv_t<CallConv>                                               \
     ) requires(!ForceGeneric)                                               \
@@ -3073,7 +3144,7 @@ private:
         return *this;                                                       \
     }                                                                       \
     register_type& method(                                                  \
-        const char* decl,                                                   \
+        std::string_view decl,                                              \
         AS_NAMESPACE_QUALIFIER asGENFUNC_t gfn,                             \
         call_conv_t<AS_NAMESPACE_QUALIFIER asCALL_GENERIC> = {}             \
     )                                                                       \
@@ -3093,7 +3164,7 @@ private:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>        \
     requires(CallConv != AS_NAMESPACE_QUALIFIER asCALL_GENERIC)  \
     register_type& method(                                       \
-        const char* decl,                                        \
+        std::string_view decl,                                   \
         Fn&& fn,                                                 \
         auxiliary_wrapper<Auxiliary> aux,                        \
         call_conv_t<CallConv>                                    \
@@ -3111,7 +3182,7 @@ private:
         native_function Fn,                                      \
         typename Auxiliary>                                      \
     register_type& method(                                       \
-        const char* decl,                                        \
+        std::string_view decl,                                   \
         Fn&& fn,                                                 \
         auxiliary_wrapper<Auxiliary> aux                         \
     ) requires(!ForceGeneric)                                    \
@@ -3128,7 +3199,7 @@ private:
     }                                                            \
     template <typename Auxiliary>                                \
     register_type& method(                                       \
-        const char* decl,                                        \
+        std::string_view decl,                                   \
         AS_NAMESPACE_QUALIFIER asGENFUNC_t gfn,                  \
         auxiliary_wrapper<Auxiliary> aux,                        \
         call_conv_t<AS_NAMESPACE_QUALIFIER asCALL_GENERIC> = {}  \
@@ -3149,7 +3220,7 @@ private:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                     \
     register_type& method(                                                    \
         use_generic_t,                                                        \
-        const char* decl,                                                     \
+        std::string_view decl,                                                \
         fp_wrapper_t<Method>,                                                 \
         call_conv_t<CallConv>                                                 \
     )                                                                         \
@@ -3164,7 +3235,7 @@ private:
     template <auto Method>                                                    \
     register_type& method(                                                    \
         use_generic_t,                                                        \
-        const char* decl,                                                     \
+        std::string_view decl,                                                \
         fp_wrapper_t<Method>                                                  \
     )                                                                         \
     {                                                                         \
@@ -3181,7 +3252,7 @@ private:
         auto Method,                                                          \
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                     \
     register_type& method(                                                    \
-        const char* decl,                                                     \
+        std::string_view decl,                                                \
         fp_wrapper_t<Method>,                                                 \
         call_conv_t<CallConv>                                                 \
     )                                                                         \
@@ -3194,7 +3265,7 @@ private:
     }                                                                         \
     template <auto Method>                                                    \
     register_type& method(                                                    \
-        const char* decl,                                                     \
+        std::string_view decl,                                                \
         fp_wrapper_t<Method>                                                  \
     )                                                                         \
     {                                                                         \
@@ -3214,7 +3285,7 @@ private:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                          \
     register_type& method(                                                         \
         use_generic_t,                                                             \
-        const char* decl,                                                          \
+        std::string_view decl,                                                     \
         fp_wrapper_t<Method>,                                                      \
         auxiliary_wrapper<Auxiliary> aux,                                          \
         call_conv_t<CallConv>                                                      \
@@ -3231,7 +3302,7 @@ private:
     template <auto Method, typename Auxiliary>                                     \
     register_type& method(                                                         \
         use_generic_t,                                                             \
-        const char* decl,                                                          \
+        std::string_view decl,                                                     \
         fp_wrapper_t<Method>,                                                      \
         auxiliary_wrapper<Auxiliary> aux                                           \
     )                                                                              \
@@ -3252,7 +3323,7 @@ private:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                          \
     requires(CallConv != AS_NAMESPACE_QUALIFIER asCALL_GENERIC)                    \
     register_type& method(                                                         \
-        const char* decl,                                                          \
+        std::string_view decl,                                                     \
         fp_wrapper_t<Method>,                                                      \
         auxiliary_wrapper<Auxiliary> aux,                                          \
         call_conv_t<CallConv>                                                      \
@@ -3266,7 +3337,7 @@ private:
     }                                                                              \
     template <auto Method, typename Auxiliary>                                     \
     register_type& method(                                                         \
-        const char* decl,                                                          \
+        std::string_view decl,                                                     \
         fp_wrapper_t<Method>,                                                      \
         auxiliary_wrapper<Auxiliary> aux                                           \
     )                                                                              \
@@ -3286,7 +3357,7 @@ private:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                   \
     register_type& method(                                                  \
         use_generic_t,                                                      \
-        const char* decl,                                                   \
+        std::string_view decl,                                              \
         const Lambda&,                                                      \
         call_conv_t<CallConv>                                               \
     )                                                                       \
@@ -3301,7 +3372,7 @@ private:
     template <noncapturing_lambda Lambda>                                   \
     register_type& method(                                                  \
         use_generic_t,                                                      \
-        const char* decl,                                                   \
+        std::string_view decl,                                              \
         const Lambda&                                                       \
     )                                                                       \
     {                                                                       \
@@ -3314,7 +3385,7 @@ private:
         noncapturing_lambda Lambda,                                         \
         asECallConvTypes CallConv>                                          \
     register_type& method(                                                  \
-        const char* decl,                                                   \
+        std::string_view decl,                                              \
         const Lambda&,                                                      \
         call_conv_t<CallConv>                                               \
     )                                                                       \
@@ -3327,7 +3398,7 @@ private:
     }                                                                       \
     template <noncapturing_lambda Lambda>                                   \
     register_type& method(                                                  \
-        const char* decl,                                                   \
+        std::string_view decl,                                              \
         const Lambda&                                                       \
     )                                                                       \
     {                                                                       \
@@ -3344,7 +3415,7 @@ private:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                                        \
     register_type& method(                                                                       \
         use_generic_t,                                                                           \
-        const char* decl,                                                                        \
+        std::string_view decl,                                                                   \
         fp_wrapper_t<Function>,                                                                  \
         var_type_t<Is...>,                                                                       \
         call_conv_t<CallConv>                                                                    \
@@ -3362,7 +3433,7 @@ private:
         std::size_t... Is,                                                                       \
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                                        \
     register_type& method(                                                                       \
-        const char* decl,                                                                        \
+        std::string_view decl,                                                                   \
         fp_wrapper_t<Function>,                                                                  \
         var_type_t<Is...>,                                                                       \
         call_conv_t<CallConv>                                                                    \
@@ -3385,7 +3456,7 @@ private:
         std::size_t... Is>                                                                       \
     register_type& method(                                                                       \
         use_generic_t,                                                                           \
-        const char* decl,                                                                        \
+        std::string_view decl,                                                                   \
         fp_wrapper_t<Function>,                                                                  \
         var_type_t<Is...>                                                                        \
     )                                                                                            \
@@ -3405,7 +3476,7 @@ private:
         auto Function,                                                                           \
         std::size_t... Is>                                                                       \
     register_type& method(                                                                       \
-        const char* decl,                                                                        \
+        std::string_view decl,                                                                   \
         fp_wrapper_t<Function>,                                                                  \
         var_type_t<Is...>                                                                        \
     )                                                                                            \
@@ -3433,7 +3504,7 @@ private:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                                             \
     register_type& method(                                                                            \
         use_generic_t,                                                                                \
-        const char* decl,                                                                             \
+        std::string_view decl,                                                                        \
         fp_wrapper_t<Function>,                                                                       \
         var_type_t<Is...>,                                                                            \
         auxiliary_wrapper<Auxiliary> aux,                                                             \
@@ -3454,7 +3525,7 @@ private:
         typename Auxiliary,                                                                           \
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                                             \
     register_type& method(                                                                            \
-        const char* decl,                                                                             \
+        std::string_view decl,                                                                        \
         fp_wrapper_t<Function>,                                                                       \
         var_type_t<Is...>,                                                                            \
         auxiliary_wrapper<Auxiliary> aux,                                                             \
@@ -3480,7 +3551,7 @@ private:
         typename Auxiliary>                                                                           \
     register_type& method(                                                                            \
         use_generic_t,                                                                                \
-        const char* decl,                                                                             \
+        std::string_view decl,                                                                        \
         fp_wrapper_t<Function>,                                                                       \
         var_type_t<Is...>,                                                                            \
         auxiliary_wrapper<Auxiliary> aux                                                              \
@@ -3503,7 +3574,7 @@ private:
         std::size_t... Is,                                                                            \
         typename Auxiliary>                                                                           \
     register_type& method(                                                                            \
-        const char* decl,                                                                             \
+        std::string_view decl,                                                                        \
         fp_wrapper_t<Function>,                                                                       \
         var_type_t<Is...>,                                                                            \
         auxiliary_wrapper<Auxiliary> aux                                                              \
@@ -3532,7 +3603,7 @@ private:
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                                    \
     register_type& method(                                                                   \
         use_generic_t,                                                                       \
-        const char* decl,                                                                    \
+        std::string_view decl,                                                               \
         const Lambda&,                                                                       \
         var_type_t<Is...>,                                                                   \
         call_conv_t<CallConv>                                                                \
@@ -3550,7 +3621,7 @@ private:
         std::size_t... Is,                                                                   \
         AS_NAMESPACE_QUALIFIER asECallConvTypes CallConv>                                    \
     register_type& method(                                                                   \
-        const char* decl,                                                                    \
+        std::string_view decl,                                                               \
         const Lambda&,                                                                       \
         var_type_t<Is...>,                                                                   \
         call_conv_t<CallConv>                                                                \
@@ -3573,7 +3644,7 @@ private:
         std::size_t... Is>                                                                   \
     register_type& method(                                                                   \
         use_generic_t,                                                                       \
-        const char* decl,                                                                    \
+        std::string_view decl,                                                               \
         const Lambda&,                                                                       \
         var_type_t<Is...>                                                                    \
     )                                                                                        \
@@ -3593,7 +3664,7 @@ private:
         noncapturing_lambda Lambda,                                                          \
         std::size_t... Is>                                                                   \
     register_type& method(                                                                   \
-        const char* decl,                                                                    \
+        std::string_view decl,                                                               \
         const Lambda&,                                                                       \
         var_type_t<Is...>                                                                    \
     )                                                                                        \
@@ -3613,6 +3684,13 @@ private:
         return *this;                                                                        \
     }
 
+/**
+ * @brief Register helper for value class
+ *
+ * @tparam Class Class to be registered
+ * @tparam Template True if the class is a templated type
+ * @tparam ForceGeneric Force all registered methods and behaviors to use the generic calling convention
+ */
 template <typename Class, bool Template = false, bool ForceGeneric = false>
 class basic_value_class final : public class_register_helper_base<ForceGeneric>
 {
@@ -3626,10 +3704,10 @@ public:
 
     basic_value_class(
         AS_NAMESPACE_QUALIFIER asIScriptEngine* engine,
-        const char* name,
+        std::string name,
         AS_NAMESPACE_QUALIFIER asQWORD flags = 0
     )
-        : my_base(engine, name)
+        : my_base(engine, std::move(name))
     {
         flags |= AS_NAMESPACE_QUALIFIER asOBJ_VALUE;
 
@@ -4826,17 +4904,26 @@ public:
     ASBIND20_CLASS_WRAPPED_VAR_TYPE_METHOD_AUXILIARY(basic_value_class)
     ASBIND20_CLASS_WRAPPED_LAMBDA_VAR_TYPE_METHOD(basic_value_class)
 
-    basic_value_class& property(const char* decl, std::size_t off)
+    template <wrappers::auto_register<basic_value_class> AutoRegister>
+    basic_value_class& use(AutoRegister&& ar)
+    {
+        ar(*this);
+
+        return *this;
+    }
+
+    basic_value_class& property(std::string_view decl, std::size_t off)
     {
         this->property_impl(decl, off);
 
         return *this;
     }
 
-    template <typename T>
-    basic_value_class& property(const char* decl, T Class::* mp)
+    template <typename MemberPointer>
+    requires(std::is_member_object_pointer_v<MemberPointer>)
+    basic_value_class& property(std::string_view decl, MemberPointer mp)
     {
-        this->template property_impl<T, Class>(decl, mp);
+        this->template property_impl<MemberPointer>(decl, mp);
 
         return *this;
     }
@@ -4852,7 +4939,7 @@ public:
         AS_NAMESPACE_QUALIFIER asIStringFactory* str_factory
     )
     {
-        this->as_string_impl(m_name, str_factory);
+        this->as_string_impl(m_name.c_str(), str_factory);
         return *this;
     }
 };
@@ -4876,10 +4963,10 @@ public:
 
     basic_ref_class(
         AS_NAMESPACE_QUALIFIER asIScriptEngine* engine,
-        const char* name,
+        std::string name,
         AS_NAMESPACE_QUALIFIER asQWORD flags = 0
     )
-        : my_base(engine, name)
+        : my_base(engine, std::move(name))
     {
         flags |= AS_NAMESPACE_QUALIFIER asOBJ_REF;
         assert(!(flags & (AS_NAMESPACE_QUALIFIER asOBJ_VALUE)));
@@ -4939,6 +5026,14 @@ public:
     ASBIND20_CLASS_WRAPPED_VAR_TYPE_METHOD(basic_ref_class)
     ASBIND20_CLASS_WRAPPED_VAR_TYPE_METHOD_AUXILIARY(basic_ref_class)
     ASBIND20_CLASS_WRAPPED_LAMBDA_VAR_TYPE_METHOD(basic_ref_class)
+
+    template <wrappers::auto_register<basic_ref_class> AutoRegister>
+    basic_ref_class& use(AutoRegister&& ar)
+    {
+        ar(*this);
+
+        return *this;
+    }
 
 private:
     std::string decl_factory(std::string_view params) const
@@ -6265,17 +6360,18 @@ public:
 
 #undef ASBIND20_REFERENCE_CLASS_BEH
 
-    basic_ref_class& property(const char* decl, std::size_t off)
+    basic_ref_class& property(std::string_view decl, std::size_t off)
     {
         this->property_impl(decl, off);
 
         return *this;
     }
 
-    template <typename T>
-    basic_ref_class& property(const char* decl, T Class::* mp)
+    template <typename MemberPointer>
+    requires(std::is_member_object_pointer_v<MemberPointer>)
+    basic_ref_class& property(std::string_view decl, MemberPointer mp)
     {
-        this->template property_impl<T, Class>(decl, mp);
+        this->template property_impl<MemberPointer>(decl, mp);
 
         return *this;
     }
@@ -6291,7 +6387,7 @@ public:
         AS_NAMESPACE_QUALIFIER asIStringFactory* str_factory
     )
     {
-        this->as_string_impl(m_name, str_factory);
+        this->as_string_impl(m_name.c_str(), str_factory);
         return *this;
     }
 
@@ -6299,7 +6395,7 @@ public:
     {
         [[maybe_unused]]
         int r = 0;
-        r = m_engine->RegisterDefaultArrayType(m_name);
+        r = m_engine->RegisterDefaultArrayType(m_name.c_str());
         assert(r >= 0);
 
         return *this;
@@ -6329,20 +6425,23 @@ public:
     interface() = delete;
     interface(const interface&) = default;
 
-    interface(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, const char* name)
-        : m_engine(engine), m_name(name)
+    interface(
+        AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, std::string name
+    )
+        : m_engine(engine), m_name(std::move(name))
     {
         [[maybe_unused]]
         int r = 0;
-        r = m_engine->RegisterInterface(m_name);
+        r = m_engine->RegisterInterface(m_name.c_str());
         assert(r >= 0);
     }
 
-    interface& method(const char* decl)
+    interface& method(std::string_view decl)
     {
         [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterInterfaceMethod(
+        int r = with_cstr(
+            &AS_NAMESPACE_QUALIFIER asIScriptEngine::RegisterInterfaceMethod,
+            m_engine,
             m_name,
             decl
         );
@@ -6372,32 +6471,44 @@ public:
         return m_engine;
     }
 
+    [[nodiscard]]
+    const std::string& get_name() const noexcept
+    {
+        return m_name;
+    }
+
 private:
     AS_NAMESPACE_QUALIFIER asIScriptEngine* m_engine;
-    const char* m_name;
+    std::string m_name;
 };
 
 template <typename Enum>
-requires(std::is_enum_v<Enum>)
+requires(std::is_enum_v<Enum> || std::integral<Enum>)
 class enum_
 {
 public:
     using enum_type = Enum;
 
-    enum_(AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, const char* name)
-        : m_engine(engine), m_name(name)
+    enum_() = delete;
+    enum_(const enum_&) = default;
+
+    enum_(
+        AS_NAMESPACE_QUALIFIER asIScriptEngine* engine, std::string name
+    )
+        : m_engine(engine), m_name(std::move(name))
     {
         [[maybe_unused]]
         int r = 0;
-        r = m_engine->RegisterEnum(m_name);
+        r = m_engine->RegisterEnum(m_name.c_str());
         assert(r >= 0);
     }
 
-    enum_& value(Enum val, const char* decl)
+    enum_& value(Enum val, std::string_view decl)
     {
         [[maybe_unused]]
-        int r = 0;
-        r = m_engine->RegisterEnumValue(
+        int r = with_cstr(
+            &AS_NAMESPACE_QUALIFIER asIScriptEngine::RegisterEnumValue,
+            m_engine,
             m_name,
             decl,
             static_cast<int>(val)
@@ -6415,12 +6526,18 @@ public:
      * @tparam Value Enum value
      */
     template <Enum Value>
+    requires(std::is_enum_v<Enum>)
     enum_& value()
     {
-        this->value(
-            Value,
-            meta::fixed_enum_name<Value>().c_str()
+        [[maybe_unused]]
+        int r = 0;
+        r = m_engine->RegisterEnumValue(
+            m_name.c_str(),
+            meta::fixed_enum_name<Value>().c_str(),
+            static_cast<int>(Value)
         );
+        assert(r >= 0);
+
         return *this;
     }
 
@@ -6431,9 +6548,15 @@ public:
         return m_engine;
     }
 
+    [[nodiscard]]
+    const std::string& get_name() const noexcept
+    {
+        return m_name;
+    }
+
 private:
     AS_NAMESPACE_QUALIFIER asIScriptEngine* m_engine;
-    const char* m_name;
+    std::string m_name;
 };
 } // namespace asbind20
 

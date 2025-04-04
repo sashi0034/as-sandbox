@@ -104,6 +104,9 @@ namespace
 
 int main(int argc, char** argv)
 {
+    // TODO: debug ビルドなら as.predefined 自動生成
+    // TODO: 開始ファイルの設定ファイルを追加
+
     std::string moduleName{};
     if (argc > 1) moduleName = argv[1];
     else std::cin >> moduleName;

@@ -144,7 +144,8 @@ T get_generic_arg(
     }
     else if constexpr(std::is_class_v<T>)
     {
-        return get_generic_arg<T&>(gen, idx);
+        using pointer_t = std::remove_reference_t<T>*;
+        return std::move(*(pointer_t)gen->GetArgObject(idx));
     }
     else if constexpr(std::is_enum_v<T>)
     {
@@ -263,7 +264,9 @@ void set_generic_return(
  *
  * @tparam Return Return type
  *
+ * @param gen The interface for the generic calling convention
  * @param fn Function to invoke
+ * @param args Arguments for the function
  */
 template <typename Return, typename Fn, typename... Args>
 void set_generic_return_by(
