@@ -19,7 +19,7 @@
 #include "angelscript/add_on/weakref/weakref.h"
 #include "asbind20/bind.hpp"
 #include "asbind20/generic.hpp"
-#include "asbind20/ext/array.hpp"
+#include "asbind20/invoke.hpp"
 
 using namespace Sandbox;
 
@@ -43,6 +43,50 @@ namespace
         {
             return flag;
         }
+    };
+
+    struct mock_ptr
+    {
+        int value;
+
+        mock_ptr(int value)
+        {
+            this->value = value;
+        }
+
+        mock_ptr& print()
+        {
+            printf("println: %d\n", value);
+            // addRef();
+            return *this;
+        }
+
+        mock_ptr& set_value(int v)
+        {
+            this->value = v;
+            // addRef();
+            return *this;
+        }
+
+        void addRef()
+        {
+            ++m_refcount;
+            std::cout << "addRef: " << m_refcount << std::endl;
+        }
+
+        void release()
+        {
+            std::cout << "release: " << m_refcount << std::endl;
+
+            if (--m_refcount == 0)
+            {
+                println("mock_ptr: release");
+                delete this;
+            }
+        }
+
+    private:
+        int m_refcount{1};
     };
 
     void registerEngine(const asbind20::script_engine& engine)
@@ -74,6 +118,13 @@ namespace
             .opConv<bool>()
             .opImplConv<bool>()
             .property("bool flag", &flag_t::flag);
+
+        asbind20::ref_class<mock_ptr>(engine, "mock_ptr")
+            .factory<int>("int value")
+            .addref(&mock_ptr::addRef)
+            .release(&mock_ptr::release)
+            .method("mock_ptr& print() const", &mock_ptr::print)
+            .method("mock_ptr& set_value(int value)", &mock_ptr::set_value);
     }
 
     int includeCallback(const char* include, const char* from, CScriptBuilder* builder, void* userParam)
@@ -104,7 +155,6 @@ namespace
 
 int main(int argc, char** argv)
 {
-    // TODO: debug ビルドなら as.predefined 自動生成
     // TODO: 開始ファイルの設定ファイルを追加
 
     std::string moduleName{};
@@ -123,12 +173,10 @@ int main(int argc, char** argv)
 
     registerEngine(engine);
 
-    if (moduleName.ends_with("as.predefined"))
-    {
-        GenerateScriptPredefined(engine, moduleName);
-        std::cout << "Generated 'as.predefined'" << std::endl;
-        return 0;
-    }
+#ifdef _DEBUG
+    auto currentDirectory = std::filesystem::current_path();
+    GenerateScriptPredefined(engine, "as-sandbox-code/as.predefined");
+#endif
 
     CScriptBuilder builder{};
     builder.SetIncludeCallback(includeCallback, nullptr);

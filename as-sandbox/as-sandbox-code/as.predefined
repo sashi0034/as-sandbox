@@ -32,19 +32,25 @@ class string{
 	string& opAddAssign(bool);
 	string opAdd(bool) const;
 	string opAdd_r(bool) const;
-	string substr(uint start = 0, int count = - 1) const;
+	string substr(uint start = 0, int count = -1) const;
 	int findFirst(const string&in, uint start = 0) const;
 	int findFirstOf(const string&in, uint start = 0) const;
 	int findFirstNotOf(const string&in, uint start = 0) const;
-	int findLast(const string&in, int start = - 1) const;
-	int findLastOf(const string&in, int start = - 1) const;
-	int findLastNotOf(const string&in, int start = - 1) const;
+	int findLast(const string&in, int start = -1) const;
+	int findLastOf(const string&in, int start = -1) const;
+	int findLastNotOf(const string&in, int start = -1) const;
 	void insert(uint pos, const string&in other);
-	void erase(uint pos, int count = - 1);
+	void erase(uint pos, int count = -1);
+	int regexFind(const string&in regex, uint start = 0, uint&out lengthOfMatch = void) const;
 }
 class array<T>{
 	T& opIndex(uint index);
 	const T& opIndex(uint index) const;
+	uint opForBegin() const;
+	bool opForEnd(uint) const;
+	uint opForNext(uint) const;
+	const T& opForValue0(uint index) const;
+	uint opForValue1(uint index) const;
 	T[]& opAssign(const T[]&in);
 	void insertAt(uint index, const T&in value);
 	void insertAt(uint index, const T[]&inout arr);
@@ -66,7 +72,7 @@ class array<T>{
 	int findByRef(uint startAt, const T&in value) const;
 	bool opEquals(const T[]&in) const;
 	bool isEmpty() const;
-	void sort(T[]::less&in, uint startAt = 0, uint count = uint ( - 1 ));
+	void sort(T[]::less&in, uint startAt = 0, uint count = uint(-1));
 	funcdef bool less(const T&in, const T&in);
 }
 class any{
@@ -74,9 +80,9 @@ class any{
 	void store(?&in);
 	void store(const int64&in);
 	void store(const double&in);
-	bool retrieve(?&out);
-	bool retrieve(int64&out);
-	bool retrieve(double&out);
+	bool retrieve(?&out) const;
+	bool retrieve(int64&out) const;
+	bool retrieve(double&out) const;
 }
 class weakref<T>{
 	~weakref();
@@ -134,6 +140,13 @@ class dictionary{
 	string[]@ getKeys() const;
 	dictionaryValue& opIndex(const string&in);
 	const dictionaryValue& opIndex(const string&in) const;
+	dictionaryIter@ opForBegin() const;
+	bool opForEnd(dictionaryIter@) const;
+	dictionaryIter@ opForNext(dictionaryIter@) const;
+	const dictionaryValue& opForValue0(dictionaryIter@) const;
+	const string& opForValue1(dictionaryIter@) const;
+}
+class dictionaryIter{
 }
 class file{
 	int open(const string&in, const string&in);
@@ -174,6 +187,7 @@ class datetime{
 	uint get_hour() const;
 	uint get_minute() const;
 	uint get_second() const;
+	uint get_weekDay() const;
 	bool setDate(uint year, uint month, uint day);
 	bool setTime(uint hour, uint minute, uint second);
 	int64 opSub(const datetime&in) const;
@@ -209,9 +223,16 @@ class flag_t{
 	flag_t(bool flag);
 	flag_t& opAssign(const flag_t&in);
 	bool opEquals(const flag_t&in) const;
+	bool opConv() const;
 	bool opImplConv() const;
 	bool flag;
 }
+class mock_ptr{
+	mock_ptr& print() const;
+	mock_ptr& set_value(int value);
+}
+uint scan(const string&in str, ?&out...);
+string format(const string&in fmt, const ?&in...);
 string formatInt(int64 val, const string&in options = "", uint width = 0);
 string formatUInt(uint64 val, const string&in options = "", uint width = 0);
 string formatFloat(double val, const string&in options = "", uint width = 0, uint precision = 0);
