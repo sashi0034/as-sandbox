@@ -81,6 +81,12 @@ namespace
                 }
             }
 
+            for (int j = 0; j < t->GetFactoryCount(); ++j)
+            {
+                const auto f = t->GetFactoryByIndex(j);
+                stream << std::format("\t{};\n", f->GetDeclaration(false, true, true));
+            }
+
             for (int j = 0; j < t->GetMethodCount(); ++j)
             {
                 const auto m = t->GetMethodByIndex(j);
